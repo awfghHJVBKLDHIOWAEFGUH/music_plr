@@ -12,7 +12,7 @@ debug = "line-tables-only"
 incremental = true
 
 [dependencies]
-iced = { version = "0.14", features = ["image", "svg", "tokio", "debug", "canvas", "advanced"] }
+iced = { version = "0.14", default-features = false, features = ["image", "svg", "tokio", "debug", "canvas", "advanced", "tiny-skia", "x11", "wayland"] }
 # Pinned to the same version iced resolves to, so we can implement the
 # `widget::operation::Operation` trait (not publicly re-exported by `iced`).
 # Keep this in lockstep with `iced`'s `iced_core` when upgrading.
