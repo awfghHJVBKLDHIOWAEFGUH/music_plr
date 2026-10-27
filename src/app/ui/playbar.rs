@@ -5,7 +5,6 @@ use iced::{
 };
 
 use super::{
-    progress_bar::ProgressBar,
     shared_components::{play_pause_button, subtitle_artist, thumbnail},
     styles::{
         bg_tertiary, button_style_playbar, fg_secondary, icon_fg, icon_fg_muted, icon_fg_secondary,
@@ -84,16 +83,15 @@ pub(super) fn view_playbar<'a>(player: &'a MusicPlayer) -> Element<'a, Message, 
     )
     .center_x(Length::Fill);
 
-    let progress: Element<'_, Message, AppTheme> = ProgressBar::new(
-        player.progress,
-        player.progress_at,
-        player.duration,
-        player.is_playing,
+    // Use Iced's built-in slider renderer instead of the invisible custom canvas.
+    let progress: Element<'_, Message, AppTheme> = slider(
+        0.0..=1.0,
+        player.playback_progress().clamp(0.0, 1.0),
+        Message::Seek,
     )
+    .width(Length::Fill)
+    .step(0.001f32)
     .into();
-
-    let controls_and_progress =
-        Column::with_children([controls.into(), progress]).spacing(theme::SPACING_XS);
 
     let volume_slider = slider(0.0..=1.0, player.volume, Message::SetVolume)
         .width(theme::VOLUME_SLIDER_WIDTH)
@@ -142,32 +140,39 @@ pub(super) fn view_playbar<'a>(player: &'a MusicPlayer) -> Element<'a, Message, 
     .width(theme::QUEUE_BTN_WIDTH)
     .height(theme::QUEUE_BTN_WIDTH);
 
+    let controls_row = Row::with_children([
+        Container::new(track_thumb)
+            .width(theme::PLAYBAR_THUMBNAIL_SIZE)
+            .height(theme::PLAYBAR_THUMBNAIL_SIZE)
+            .into(),
+        Container::new(track_info)
+            .width(theme::PLAYBAR_TRACK_INFO_WIDTH)
+            .into(),
+        like_btn,
+        Container::new(controls).width(Length::Fill).into(),
+        icons::icon(icons::VOLUME_ICON, theme::ICON_SIZE_SM)
+            .style(icon_fg_secondary())
+            .into(),
+        volume_slider.into(),
+        repeat_btn.into(),
+        queue_btn.into(),
+        lyrics_btn.into(),
+    ])
+    .spacing(theme::SPACING_MD)
+    .align_y(alignment::Vertical::Center);
+
+    let progress_row = Row::with_children([
+        Container::new(elapsed_text).into(),
+        Container::new(progress).width(Length::Fill).into(),
+        Container::new(total_text).into(),
+    ])
+    .spacing(theme::SPACING_MD)
+    .align_y(alignment::Vertical::Center);
+
     Container::new(
-        Row::with_children([
-            Container::new(track_thumb)
-                .width(theme::PLAYBAR_THUMBNAIL_SIZE)
-                .height(theme::PLAYBAR_THUMBNAIL_SIZE)
-                .into(),
-            Container::new(track_info)
-                .width(theme::PLAYBAR_TRACK_INFO_WIDTH)
-                .into(),
-            like_btn,
-            Container::new(elapsed_text).into(),
-            Container::new(controls_and_progress)
-                .width(Length::Fill)
-                .into(),
-            Container::new(total_text).into(),
-            icons::icon(icons::VOLUME_ICON, theme::ICON_SIZE_SM)
-                .style(icon_fg_secondary())
-                .into(),
-            volume_slider.into(),
-            repeat_btn.into(),
-            queue_btn.into(),
-            lyrics_btn.into(),
-        ])
-        .spacing(theme::SPACING_MD)
-        .align_y(alignment::Vertical::Center)
-        .padding([theme::SPACING_LG, theme::SPACING_XL]),
+        Column::with_children([controls_row.into(), progress_row.into()])
+            .spacing(theme::SPACING_XS)
+            .padding([theme::SPACING_LG, theme::SPACING_XL]),
     )
     .style(bg_tertiary())
     .into()

@@ -118,6 +118,10 @@ impl Widget<Message, AppTheme, iced::Renderer> for ProgressBar {
             return;
         }
         let state: &mut State = tree.state.downcast_mut();
+        static DRAW_LOG: std::sync::Once = std::sync::Once::new();
+        DRAW_LOG.call_once(|| {
+            eprintln!("PROGRESS_DRAW_CALLED bounds={:?}", layout.bounds());
+        });
         let bounds = layout.bounds();
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
@@ -179,6 +183,12 @@ impl Widget<Message, AppTheme, iced::Renderer> for ProgressBar {
         let frac = self.displayed();
         let cy = bounds.height / 2.0;
         let mut frame = canvas::Frame::new(renderer, bounds.size());
+
+        frame.fill_rectangle(
+            iced::Point::ORIGIN,
+            bounds.size(),
+            iced::Color::from_rgb(1.0, 0.0, 1.0),
+        );
         let mut rail = |x: f32, w: f32, color: iced::Color| {
             frame.fill(
                 &canvas::Path::rectangle(

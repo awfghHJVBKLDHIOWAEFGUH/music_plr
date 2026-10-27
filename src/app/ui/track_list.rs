@@ -76,7 +76,7 @@ where
             ..
         }) if count > 0 && count as f32 * theme::ROW_HEIGHT > bounds.height + 1.0 => {
             let viewport_height = bounds.height;
-            let overscan = 6i32;
+            let overscan = 2i32;
             let row_h = theme::ROW_HEIGHT;
 
             let first =
