@@ -24,7 +24,6 @@ iced = { version = "0.14", default-features = false, features = [
     "tokio",
     "canvas",
     "advanced",
-    "wgpu",
     "tiny-skia",
     "crisp",
     "web-colors",
