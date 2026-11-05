@@ -49,6 +49,14 @@ Test machine:
 
 This was tested on one machine. We did not run a cross-platform test matrix or a controlled FPS benchmark.
 
+## Cross-platform compatibility
+
+We are roughly **90% confident** that cross-platform compatibility should remain intact. This is an engineering estimate based on the scope of the change, not a measured compatibility rate.
+
+The change was limited to the renderer configuration: we enabled Iced's TinySkia feature and removed the explicit Iced `wgpu` feature. We did not intentionally change the audio, provider, playback, media-control, file-handling, or platform-specific application code. The existing X11 and Wayland features were kept.
+
+In other words, we changed how the interface is drawn, not the parts responsible for playing music or connecting to providers. The build and runtime checks passed on our CachyOS test machine, but Windows, macOS, and other Linux environments have not been tested after this change. So cross-platform support is expected to remain, but is not yet confirmed on every platform.
+
 ## Known issue
 
 Very long track titles can sometimes overlap the next row in the upright track list. It is a small visual issue and was left as-is.
