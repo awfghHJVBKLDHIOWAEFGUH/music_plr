@@ -26,19 +26,19 @@ We measured process memory using `/proc/<pid>/smaps_rollup` and process status i
 
 A later TinySkia reading during playback was 56,520 kB RSS (55.2 MiB) and 45,563 kB PSS (44.5 MiB).
 
-These are readings from our tests, not a formal benchmark. The original build was measured idle, while the first TinySkia reading was taken during playback, so the workloads were not identical. The numbers are useful as observed memory usage, but should not be treated as a controlled head-to-head result.
+These are readings from my tests, not a formal benchmark. The original build was measured idle, while the first TinySkia reading was taken during playback, so the workloads were not identical. The numbers are useful as observed memory usage, but should not be treated as a controlled head-to-head result.
 
 ## Build and testing
 
 The optimized release build completed in about 2 minutes 30 seconds on the test machine.
 
-We tested:
+I tested:
 - Audio playback
 - Album artwork
 - Mosaic rendering
 - SVG rendering
 
-All four worked.
+All four worked on my CachyOS setup.
 
 Test machine:
 - CachyOS
@@ -47,7 +47,7 @@ Test machine:
 - Intel UHD Graphics 730
 - 16 GB RAM
 
-This was tested on one machine. We did not run a cross-platform test matrix or a controlled FPS benchmark.
+This was tested on one machine. I did not run a cross-platform test matrix or a controlled FPS benchmark.
 
 ## Cross-platform compatibility
 
