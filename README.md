@@ -141,3 +141,44 @@ replay.
 ## License
 
 MIT
+
+---
+
+## v1.5.1 TinySkia fork
+
+This fork contains an experimental renderer/dependency configuration branch based on the official **GooseMusic v1.5.1** source tag. The work keeps the existing application and its audio, provider, media-control, and UI code intact while enabling Iced's TinySkia renderer feature and dropping the app's explicit Iced `wgpu` feature.
+
+The implementation lives on the **[`tiny-skia-v1.5.1` branch](https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr/tree/tiny-skia-v1.5.1)**. The default `master` branch remains unchanged apart from this documentation entry.
+
+### What changed
+
+- **Base:** GooseMusic `v1.5.1`, based on upstream commit `e1d27d8e`.
+- **Iced:** `0.14`.
+- **TinySkia renderer crates resolved:** `iced_tiny_skia 0.14.1` and `tiny-skia 0.11.4`.
+- **Cargo feature change:** removed the single explicit `wgpu` feature from the `iced` dependency; retained `tiny-skia` and the other 10 features: `image`, `svg`, `tokio`, `canvas`, `advanced`, `crisp`, `web-colors`, `thread-pool`, `x11`, and `wayland`.
+- **Files changed for the migration:** `Cargo.toml` and `Cargo.lock`; no application UI or audio source files were changed in the migration commit.
+- **Lockfile diff:** 14 insertions and 332 deletions (346 changed lines).
+
+The feature change is specifically the removal of the app's explicit Iced `wgpu` feature. The committed lockfile still contains WGPU-related package records, so this work does not claim that every WGPU-named crate has been eliminated from dependency resolution.
+
+### Build and runtime validation
+
+- Optimized release build completed successfully.
+- Recorded release-build time: **2 minutes 30 seconds** on the local test machine.
+- Runtime checks passed for **audio playback, album artwork, mosaic rendering, and SVG rendering**.
+- Validation environment: **CachyOS / Wayland / Hyprland**, Intel Core **i5-12400T**, Intel UHD Graphics **730**, and **16 GB RAM**.
+
+These are local validation results, not a cross-platform test matrix. No controlled v1.5.1 performance benchmark was recorded, so no FPS, memory, or speed improvement is claimed here.
+
+### Known limitation
+
+Very long track titles can occasionally crowd/overlap adjacent rows in the upright track list. This is a minor presentation issue; the attempted layout adjustment was not included in the migration commit.
+
+### Branch and commit
+
+- Branch: [`tiny-skia-v1.5.1`](https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr/tree/tiny-skia-v1.5.1)
+- Migration commit: [`614e954`](https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr/commit/614e9543932a94b0ff5a1498bd219fb095c2604e)
+- Fork: [awfghHJVBKLDHIOWAEFGUH/music_plr](https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr)
+
+This is a focused fork branch for testing the TinySkia configuration; it does not replace the upstream project's release or installation instructions.
+
