@@ -1,6 +1,6 @@
 # Build GooseMusic TinySkia release binaries for every supported desktop target.
 #
-# A manual dispatch runs the build/package jobs only (validation).
+# Pushes to release-prep/** run build/package jobs only (validation).
 # Pushing a v*-tiny-skia.* tag builds and publishes a GitHub Release.
 #
 # Platforms (one job each):
@@ -15,7 +15,6 @@
 name: Release
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - "release-prep/**"
