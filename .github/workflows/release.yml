@@ -90,7 +90,7 @@ jobs:
       - name: Run tests
         env:
           GOOSE_RELEASE_TAG: v1.5.1-tiny-skia.1
-        run: cargo test --locked
+        run: cargo test --locked -- --test-threads=1
 
       - name: Build
         env:
