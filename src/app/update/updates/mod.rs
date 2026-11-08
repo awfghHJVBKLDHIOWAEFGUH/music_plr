@@ -240,6 +240,11 @@ fn version_gt(latest: &str, current: &str) -> bool {
     }
 }
 
+/// Compare a candidate release against the exact release tag embedded in this binary.
+fn is_update_available(latest: &str) -> bool {
+    version_gt(latest, APP_RELEASE_TAG)
+}
+
 /// Shared `ureq` agent with timeouts so a dead GitHub endpoint can't hang a
 /// background thread indefinitely.
 fn agent() -> &'static ureq::Agent {
@@ -272,7 +277,7 @@ pub fn spawn_version_check(tx: std::sync::mpsc::Sender<BackendResult>) {
         let result: Result<VersionCheckOutcome, String> = (|| {
             let latest = fetch_latest_version()?;
 
-            if !version_gt(&latest, APP_VERSION) {
+            if !is_update_available(&latest) {
                 return Ok(VersionCheckOutcome::UpToDate);
             }
 
@@ -563,6 +568,7 @@ mod tests {
         assert_eq!(parse_release_key("v1.5.1-tiny-skia.1"), Some((1, 5, 1, 1)));
         assert_eq!(parse_release_key("v1.5.1"), Some((1, 5, 1, 0)));
         assert!(!version_gt("v1.5.1-tiny-skia.1", "v1.5.1-tiny-skia.1"));
+        assert!(!is_update_available(APP_RELEASE_TAG));
         assert!(!version_gt("1.3.4", "1.3.5"));
     }
 
