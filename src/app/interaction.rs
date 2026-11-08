@@ -430,10 +430,10 @@ pub enum CardAction {
     ToggleLibrary,
 }
 
-impl CardAction {
-    pub fn to_message(self) -> super::message::Message {
+impl From<CardAction> for super::message::Message {
+    fn from(action: CardAction) -> Self {
         use super::message::Message;
-        match self {
+        match action {
             CardAction::Open => Message::CardMenuOpen,
             CardAction::OpenInBrowser => Message::CardMenuOpenInBrowser,
             CardAction::SaveAsPlaylist => Message::CardMenuSaveAsPlaylist,

@@ -129,18 +129,19 @@ pub enum ArtistKindData {
     Related(Vec<RelatedArtistCard>),
 }
 
-impl ArtistKindData {
-    /// View as section content (for rendering a section directly).
-    pub fn to_section_content(&self) -> SectionContent {
-        match self {
-            Self::Popular(tracks) => SectionContent::Tracks(tracks.clone()),
-            Self::Albums(albums) => SectionContent::Albums(albums.clone()),
-            Self::Playlists(playlists) => SectionContent::Playlists(playlists.clone()),
-            Self::Related(related) => SectionContent::Related(related.clone()),
-            Self::Header(_) => SectionContent::default(),
+impl From<&ArtistKindData> for SectionContent {
+    fn from(data: &ArtistKindData) -> Self {
+        match data {
+            ArtistKindData::Popular(tracks) => SectionContent::Tracks(tracks.clone()),
+            ArtistKindData::Albums(albums) => SectionContent::Albums(albums.clone()),
+            ArtistKindData::Playlists(playlists) => SectionContent::Playlists(playlists.clone()),
+            ArtistKindData::Related(related) => SectionContent::Related(related.clone()),
+            ArtistKindData::Header(_) => SectionContent::default(),
         }
     }
+}
 
+impl ArtistKindData {
     /// Store into an [`ArtistPage`] under `kind`.
     fn store(&self, page: &mut ArtistPage) {
         match self {
@@ -460,7 +461,7 @@ mod tests {
                     .into_iter()
                     .find(|k| k.data_kind() == kind)
                     .unwrap();
-                state.section_mut(sk).state = LoadState::Ready(data.to_section_content());
+                state.section_mut(sk).state = LoadState::Ready(SectionContent::from(&data));
             }
         }
 
@@ -482,9 +483,10 @@ mod tests {
                 ArtistDataKind::Albums,
                 &ArtistKindData::Albums(vec![ArtistAlbumCard::default()]),
             );
-        state.section_mut(ArtistSectionKind::Albums).state = LoadState::Ready(
-            ArtistKindData::Albums(vec![ArtistAlbumCard::default()]).to_section_content(),
-        );
+        state.section_mut(ArtistSectionKind::Albums).state =
+            LoadState::Ready(SectionContent::from(&ArtistKindData::Albums(vec![
+                ArtistAlbumCard::default(),
+            ])));
 
         // Back to YouTube: must be a cache hit, no reload.
         assert!(

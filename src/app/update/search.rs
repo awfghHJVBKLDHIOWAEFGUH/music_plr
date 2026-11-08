@@ -5,6 +5,7 @@ use crate::{
     },
     data::library::Card,
     load_state::LoadState,
+    providers::SearchScope,
     types::Track,
 };
 
@@ -206,7 +207,7 @@ impl MusicPlayer {
         if search.exhausted || count == 0 || search.append_in_flight {
             return;
         }
-        let scope = search.tab.scope();
+        let scope = SearchScope::from(&search.tab);
 
         // Append targets the slot that issued the original search. The id was
         // zeroed when the initial results landed, so mint a fresh one.

@@ -6,27 +6,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use super::{JsonStore, StoreLocation};
-use crate::lyrics::{LyricLine, Lyrics, LyricsProvider, TranslatedLyrics};
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct CachedLyrics {
-    pub plain: String,
-    pub lines: Vec<LyricLine>,
-    pub provider: LyricsProvider,
-    #[serde(default)]
-    pub translations: Vec<TranslatedLyrics>,
-}
-
-impl CachedLyrics {
-    pub fn to_lyrics(&self) -> Lyrics {
-        Lyrics {
-            lines: self.lines.clone(),
-            plain: self.plain.clone(),
-            provider: self.provider,
-            translations: self.translations.clone(),
-        }
-    }
-}
+use crate::lyrics::{LyricLine, Lyrics, LyricsProvider};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CustomLyricsEntry {
@@ -35,11 +15,11 @@ pub struct CustomLyricsEntry {
     pub lines: Vec<LyricLine>,
 }
 
-impl CustomLyricsEntry {
-    pub fn to_lyrics(&self) -> Lyrics {
+impl From<&CustomLyricsEntry> for Lyrics {
+    fn from(entry: &CustomLyricsEntry) -> Self {
         Lyrics {
-            lines: self.lines.clone(),
-            plain: self.plain.clone(),
+            lines: entry.lines.clone(),
+            plain: entry.plain.clone(),
             provider: LyricsProvider::Custom,
             translations: Vec::new(),
         }
@@ -57,7 +37,7 @@ const LYRICS_CACHE_VERSION: u32 = 2;
 pub struct LyricsCache {
     #[serde(default)]
     version: u32,
-    entries: HashMap<String, Vec<CachedLyrics>>,
+    entries: HashMap<String, Vec<Lyrics>>,
     #[serde(default)]
     custom: HashMap<String, Vec<CustomLyricsEntry>>,
 }
@@ -114,7 +94,7 @@ impl LyricsCache {
         self.entries
             .get(track_key)
             .and_then(|list| list.iter().find(|e| e.provider == provider))
-            .map(CachedLyrics::to_lyrics)
+            .cloned()
     }
 
     /// Store lyrics for a track key, upserting the per-provider entry (the
@@ -127,12 +107,7 @@ impl LyricsCache {
             slot.lines.clone_from(&lyrics.lines);
             slot.translations.clone_from(&lyrics.translations);
         } else {
-            list.push(CachedLyrics {
-                plain: lyrics.plain.clone(),
-                lines: lyrics.lines.clone(),
-                provider: lyrics.provider,
-                translations: lyrics.translations.clone(),
-            });
+            list.push(lyrics.clone());
         }
         self.save();
     }
@@ -151,7 +126,7 @@ impl LyricsCache {
             .get(track_key)?
             .iter()
             .find(|e| e.name == name)
-            .map(CustomLyricsEntry::to_lyrics)
+            .map(Lyrics::from)
     }
 
     /// Store a named custom entry, upserting on the name.

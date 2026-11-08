@@ -1,9 +1,12 @@
 use super::{is_main_pane, pane_first_index, Message, MusicPlayer, Task, ViewData};
-use crate::app::{
-    interaction::TrackPos,
-    pane::{PaneId, SplitDir, MAX_PANES},
-    ui::track_list_id,
-    ViewKind,
+use crate::{
+    app::{
+        interaction::TrackPos,
+        pane::{PaneId, SplitDir, MAX_PANES},
+        ui::track_list_id,
+        ViewKind,
+    },
+    providers::SearchScope,
 };
 
 impl MusicPlayer {
@@ -24,7 +27,7 @@ impl MusicPlayer {
 
     pub(super) fn sync_search_scope(&mut self, pane: PaneId) {
         if let ViewKind::Search(s) = &self.view_data_in(pane).kind {
-            let scope = s.tab.scope();
+            let scope = SearchScope::from(&s.tab);
             self.pane_mut(pane).search_scope = scope;
         }
     }

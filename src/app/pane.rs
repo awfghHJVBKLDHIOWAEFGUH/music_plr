@@ -102,8 +102,10 @@ impl Pane {
     pub const fn can_navigate_forward(&self) -> bool {
         self.nav_history_pos + 1 < self.nav_history.len()
     }
+}
 
-    pub fn from_data(data: PaneData) -> Self {
+impl From<PaneData> for Pane {
+    fn from(data: PaneData) -> Self {
         let (nav_history, nav_history_pos) = if data.nav_history.is_empty() {
             (vec![ViewData::default()], 0)
         } else {
@@ -362,12 +364,6 @@ impl From<&Pane> for PaneData {
             search_scope: pane.search_scope,
             search_provider: pane.search_provider,
         }
-    }
-}
-
-impl PaneData {
-    pub fn into_pane(self) -> Pane {
-        Pane::from_data(self)
     }
 }
 

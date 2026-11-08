@@ -776,13 +776,15 @@ fn playlist_page_url(id: &str) -> String {
     format!("https://music.youtube.com/playlist?list={id}")
 }
 
-fn search_filter(scope: SearchScope) -> MusicSearchFilter {
-    match scope {
-        SearchScope::Songs => MusicSearchFilter::Songs,
-        SearchScope::Videos => MusicSearchFilter::Videos,
-        SearchScope::Artists => MusicSearchFilter::Artists,
-        SearchScope::Albums => MusicSearchFilter::Albums,
-        SearchScope::Playlists => MusicSearchFilter::Playlists,
+impl From<SearchScope> for MusicSearchFilter {
+    fn from(scope: SearchScope) -> Self {
+        match scope {
+            SearchScope::Songs => MusicSearchFilter::Songs,
+            SearchScope::Videos => MusicSearchFilter::Videos,
+            SearchScope::Artists => MusicSearchFilter::Artists,
+            SearchScope::Albums => MusicSearchFilter::Albums,
+            SearchScope::Playlists => MusicSearchFilter::Playlists,
+        }
     }
 }
 
@@ -790,10 +792,10 @@ fn search_ytmusic(query: &str, scope: SearchScope) -> Result<(Vec<Track>, Search
     if query.trim().is_empty() {
         return charts_search(scope);
     }
-    let filter = search_filter(scope);
+    let filter = MusicSearchFilter::from(scope);
     if matches!(scope, SearchScope::Songs | SearchScope::Videos) {
         let tracks = search_tracks_raw(query, filter)?;
-        return Ok((tracks, SearchTab::from_scope(scope)));
+        return Ok((tracks, scope.into()));
     }
     let session = session()?;
     let query = query.to_string();
@@ -845,7 +847,7 @@ fn charts_search(scope: SearchScope) -> Result<(Vec<Track>, SearchTab)> {
         SearchScope::Songs | SearchScope::Videos => {
             if let Ok(tracks) = chart_video_tracks() {
                 if !tracks.is_empty() {
-                    return Ok((tracks, SearchTab::from_scope(scope)));
+                    return Ok((tracks, scope.into()));
                 }
             }
             let session = session()?;
@@ -855,7 +857,7 @@ fn charts_search(scope: SearchScope) -> Result<(Vec<Track>, SearchTab)> {
             } else {
                 raw_two_row_tracks(&raw, &[])
             };
-            Ok((tracks, SearchTab::from_scope(scope)))
+            Ok((tracks, scope.into()))
         }
         SearchScope::Artists => {
             let session = session()?;

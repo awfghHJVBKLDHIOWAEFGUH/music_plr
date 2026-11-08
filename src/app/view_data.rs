@@ -332,7 +332,7 @@ impl ViewData {
             kind: ViewKind::Search(SearchData {
                 query,
                 provider,
-                tab: crate::providers::SearchTab::from_scope(scope),
+                tab: scope.into(),
                 ..Default::default()
             }),
             content: LoadState::Loading,

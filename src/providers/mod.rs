@@ -699,9 +699,8 @@ pub enum SearchTab {
     Playlists(Vec<CardData>),
 }
 
-impl SearchTab {
-    /// The tab for a search scope when no results have arrived yet.
-    pub fn from_scope(scope: SearchScope) -> Self {
+impl From<SearchScope> for SearchTab {
+    fn from(scope: SearchScope) -> Self {
         match scope {
             SearchScope::Songs => SearchTab::Songs,
             SearchScope::Videos => SearchTab::Videos,
@@ -710,10 +709,11 @@ impl SearchTab {
             SearchScope::Playlists => SearchTab::Playlists(Vec::new()),
         }
     }
+}
 
-    /// The search scope represented by this tab (inverse of [`from_scope`]).
-    pub fn scope(&self) -> SearchScope {
-        match self {
+impl From<&SearchTab> for SearchScope {
+    fn from(tab: &SearchTab) -> Self {
+        match tab {
             SearchTab::Songs => SearchScope::Songs,
             SearchTab::Videos => SearchScope::Videos,
             SearchTab::Artists(_) => SearchScope::Artists,
@@ -721,7 +721,9 @@ impl SearchTab {
             SearchTab::Playlists(_) => SearchScope::Playlists,
         }
     }
+}
 
+impl SearchTab {
     /// Whether this tab shows the playable track list (vs. card results).
     pub fn is_track_tab(&self) -> bool {
         matches!(self, SearchTab::Songs | SearchTab::Videos)
@@ -804,9 +806,7 @@ pub fn search_more(
 ) -> Result<(Vec<Track>, SearchTab)> {
     if !matches!(scope, SearchScope::Songs | SearchScope::Videos) {
         return match provider {
-            ProviderId::YouTube | ProviderId::Local => {
-                Ok((Vec::new(), SearchTab::from_scope(scope)))
-            }
+            ProviderId::YouTube | ProviderId::Local => Ok((Vec::new(), scope.into())),
             _ => search(provider, query, scope, offset),
         };
     }
@@ -821,7 +821,7 @@ pub fn search_more(
         }
         ProviderId::Local => Vec::new(),
     };
-    Ok((tracks, SearchTab::from_scope(scope)))
+    Ok((tracks, scope.into()))
 }
 
 /// Drill down into a card (artist/album/playlist) for `provider`. Returns the
@@ -1296,6 +1296,6 @@ mod tests {
             search_more(ProviderId::YouTube, "night drive", SearchScope::Artists, 10).unwrap();
         assert!(tracks.is_empty());
         assert_eq!(tab.card_count(), Some(0));
-        assert_eq!(tab.scope(), SearchScope::Artists);
+        assert_eq!(SearchScope::from(&tab), SearchScope::Artists);
     }
 }

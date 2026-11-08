@@ -334,7 +334,7 @@ fn collect<'a>(path: &'a [&'a str], value: &'a serde_json::Value) -> &'a [serde_
 pub fn search(query: &str, scope: SearchScope, offset: usize) -> Result<(Vec<Track>, SearchTab)> {
     let query = query.trim();
     if query.is_empty() {
-        return Ok((Vec::new(), SearchTab::from_scope(scope)));
+        return Ok((Vec::new(), scope.into()));
     }
     let page = (offset / SEARCH_PAGE_SIZE + 1).to_string();
     let limit = SEARCH_PAGE_SIZE.to_string();

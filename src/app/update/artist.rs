@@ -260,7 +260,7 @@ impl MusicPlayer {
             if let Some(section_kind) = section_kind {
                 if artist_page.section(section_kind).provider == Some(provider) {
                     artist_page.section_mut(section_kind).state =
-                        LoadState::Ready(data.to_section_content());
+                        LoadState::Ready(SectionContent::from(&data));
                     if section_kind == ArtistSectionKind::Popular {
                         if let ArtistKindData::Popular(tracks) = data {
                             let slot = &mut self.pane_mut(pane).nav_history[idx];

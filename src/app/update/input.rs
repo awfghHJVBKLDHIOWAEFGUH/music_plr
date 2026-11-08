@@ -99,7 +99,7 @@ fn apply_card_menu_shortcut(
             Some(ContextMenuFocus::Item(i)) => menu
                 .actions()
                 .get(i)
-                .map_or_else(Task::none, |a| Task::done(a.to_message())),
+                .map_or_else(Task::none, |a| Task::done((*a).into())),
             _ => Task::none(),
         },
         _ => Task::none(),

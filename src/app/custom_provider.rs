@@ -56,8 +56,8 @@ impl Default for CustomProviderForm {
     }
 }
 
-impl CustomProviderForm {
-    pub fn from_provider(provider: &CustomProvider) -> Self {
+impl From<&CustomProvider> for CustomProviderForm {
+    fn from(provider: &CustomProvider) -> Self {
         Self {
             id: Some(provider.id),
             name: provider.name.clone(),
@@ -69,7 +69,9 @@ impl CustomProviderForm {
             test_rid: 0,
         }
     }
+}
 
+impl CustomProviderForm {
     pub fn set_field(&mut self, field: CustomProviderField, value: String) {
         match field {
             CustomProviderField::Name => self.name = value,

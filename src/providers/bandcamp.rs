@@ -123,7 +123,7 @@ fn fetch_artist(id: &str) -> Result<bandcamp::Artist> {
 
 pub fn search(query: &str, scope: SearchScope, offset: usize) -> Result<(Vec<Track>, SearchTab)> {
     if offset > 0 {
-        return Ok((Vec::new(), SearchTab::from_scope(scope)));
+        return Ok((Vec::new(), scope.into()));
     }
     let items = block_on(bandcamp::search(query))?;
     match scope {

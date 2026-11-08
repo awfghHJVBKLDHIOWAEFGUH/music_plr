@@ -59,7 +59,7 @@ impl MusicPlayer {
         self.panes = state
             .panes
             .into_iter()
-            .map(|data| (data.id, data.into_pane()))
+            .map(|data| (data.id, data.into()))
             .collect();
         if self.panes.is_empty() {
             self.panes.insert(0, crate::app::Pane::new(0));

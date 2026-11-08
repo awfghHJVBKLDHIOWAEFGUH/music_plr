@@ -155,8 +155,7 @@ impl MusicPlayer {
             .iter()
             .find(|provider| provider.id == id)
         {
-            self.custom_provider_form =
-                Some(crate::app::CustomProviderForm::from_provider(provider));
+            self.custom_provider_form = Some(crate::app::CustomProviderForm::from(provider));
         }
     }
 
