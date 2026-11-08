@@ -24,7 +24,7 @@ pub enum ErrorKind {
     Denied,
     /// The track/artist/page doesn't exist (anymore) on that provider.
     Unavailable,
-    /// A helper binary (yt-dlp, Python 3) is missing or won't run.
+    /// A helper binary (yt-dlp) is missing or won't run.
     ToolMissing,
     /// The answer didn't parse: unexpected HTML/JSON, truncated body.
     Parse,
@@ -129,9 +129,6 @@ const MARKERS: &[(ErrorKind, &[&str])] = &[
             "not installed",
             "command not found",
             "no such file or directory",
-            "python 3 not found",
-            "no module named",
-            "modulenotfounderror",
         ],
     ),
     (
@@ -262,16 +259,12 @@ mod tests {
             ),
             ("yt-dlp is not installed", ErrorKind::ToolMissing),
             (
-                "ytmusicapi search failed: ModuleNotFoundError: No module named 'ytmusicapi'",
-                ErrorKind::ToolMissing,
-            ),
-            (
                 "error sending request: connection refused",
                 ErrorKind::Network,
             ),
             ("expected value at line 1 column 1", ErrorKind::Parse),
             (
-                "ytmusicapi search failed: json.decoder.JSONDecodeError",
+                "failed to parse YouTube Music response: expected value at line 1 column 1",
                 ErrorKind::Parse,
             ),
         ];

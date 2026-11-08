@@ -281,12 +281,9 @@ jobs:
 
           `goosemusic` is a self-contained binary. On first launch it checks
           for its external tools and can **download `yt-dlp` for you** — a
-          standalone binary needing no Python — just accept the prompt. Only
-          optional extras remain:
+          standalone binary. Just accept the prompt.
 
           - **`yt-dlp`** — YouTube audio streaming & downloads (auto-downloaded if missing)
-          - **Python 3** + `ytmusicapi` — nicer YouTube Music search; without it the app
-            falls back to `yt-dlp` (these are *not* auto-installed)
           - **D-Bus** session bus (Linux) — MPRIS media-key integration (OS-provided)
 
           Nothing needs installing manually to play, stream, or download.

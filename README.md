@@ -6,7 +6,7 @@ A YouTube/SoundCloud/Bandcamp search music player with local playback, downloads
 
 ## Features
 
-- **Search** — YouTube Music (Songs / Videos / Artists / Albums / Playlists) via ytmusicapi with yt-dlp fallback, plus SoundCloud, Bandcamp, Last.fm (built-in app key), and MusicBrainz search. Drill
+- **Search** — YouTube Music (Songs / Videos / Artists / Albums / Playlists) via the InnerTube API with yt-dlp fallback, plus SoundCloud, Bandcamp, Last.fm (built-in app key), and MusicBrainz search. Drill
   into artists, albums, and playlists.
 - **Custom providers** — Add your own Subsonic-compatible server (Navidrome, Airsonic, Gonic) or Jellyfin server in Settings, test the connection, and use it for search, playback, downloads, radio, browsing, and artist pages.
 - **Streaming & caching** — Stream audio via yt-dlp (YouTube/SoundCloud) or direct HTTP (Bandcamp), with fully native decoding, cached to disk for instant replay.
@@ -72,8 +72,7 @@ Pick a language from the in-app **Settings** view. To add one, copy `src/i18n/en
 **Prerequisites**
 
 - **Rust** (stable, edition 2021)
-- **yt-dlp** — YouTube audio streaming and downloads
-- **Python 3** + `ytmusicapi` — YouTube Music search (optional; falls back to yt-dlp)
+- **yt-dlp** — YouTube audio streaming, downloads, and search pagination
 - **D-Bus** session bus (Linux) — for MPRIS
 - Network access — lyrics fetch live from [LRCLib](https://lrclib.net) and [Genius](https://genius.com) (no keys)
 

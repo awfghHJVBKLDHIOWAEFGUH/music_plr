@@ -62,13 +62,12 @@ souvlaki = { version = "0.8", default-features = false, features = ["use_zbus"] 
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
 musicbrainz_rs = { version = "0.14", features = ["sync"] }
+innertube-rs = "0.10.1"
 bandcamp = "0.3.4"
 rsoundcloud = "0.2"
 opensubsonic = "0.6.1"
 csv = "1"
 sys-locale = "0.3"
-flate2 = "1"
-tar = "0.4"
 sha2 = "0.11"
 unicode-normalization = "0.1.26"
 [target.'cfg(unix)'.dependencies]

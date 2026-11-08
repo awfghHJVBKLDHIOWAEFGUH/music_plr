@@ -34,7 +34,7 @@ pub enum HomeSectionKind {
 }
 
 impl HomeSectionKind {
-    /// Stable key for the on-disk cache and the python bridge.
+    /// Stable key for the on-disk cache and the provider fetch.
     pub fn key(self) -> &'static str {
         match self {
             HomeSectionKind::QuickPicks => "quick_picks",
@@ -245,8 +245,10 @@ fn home_capable(provider: ProviderId) -> bool {
         return false;
     }
     match provider {
-        ProviderId::YouTube => crate::deps::availability().ytmusicapi,
-        ProviderId::SoundCloud | ProviderId::Bandcamp | ProviderId::LastFm => true,
+        ProviderId::YouTube
+        | ProviderId::SoundCloud
+        | ProviderId::Bandcamp
+        | ProviderId::LastFm => true,
         ProviderId::MusicBrainz | ProviderId::Local => false,
         ProviderId::Custom(_, _) => provider.capabilities().search,
     }

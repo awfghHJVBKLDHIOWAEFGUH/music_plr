@@ -426,15 +426,16 @@ pub fn dep_install_status(
     op: Option<&DepOpState>,
     tr: &Strings,
 ) -> Option<Element<'static, Message, AppTheme>> {
-    if op.is_some_and(|o| o.installing) {
-        return Some(
-            match op.and_then(|o| (o.progress.1 > 0).then_some(o.progress)) {
-                Some((downloaded, total)) => dep_progress_bar(downloaded, total, tr),
-                None => text(tr.deps_installing).style(fg_secondary()).into(),
-            },
-        );
+    let op = op?;
+    if op.installing {
+        let (downloaded, total) = op.progress;
+        return Some(if total > 0 {
+            dep_progress_bar(downloaded, total, tr)
+        } else {
+            text(tr.deps_installing).style(fg_secondary()).into()
+        });
     }
-    if let Some(res) = op.and_then(|o| o.install_result.as_ref()) {
+    if let Some(res) = op.install_result.as_ref() {
         return Some(match res {
             Ok(()) => text(tr.deps_installed).style(fg_accent()).into(),
             Err(e) => text((tr.deps_failed_detail)(e.as_str()))

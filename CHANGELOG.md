@@ -8,6 +8,16 @@ workflow extracts the section matching the tag and prepends it to the release
 body. `generate_release_notes` stays on, so GitHub still appends the
 auto-generated compare link below it.
 
+## [1.5.4] - 2026-11-08
+
+### Changed
+
+- Migrated from ytmusicapi to innertube-rs.
+
+### Removed
+
+- Python and ytmusicapi dependencies.
+
 ## [1.5.3] - 2026-11-07
 
 ### Changed
@@ -202,6 +212,7 @@ Plain lyrics are now displayed correctly when synced lyrics are not available.
 - Clearing non-main list selection on navigation.
 - Selection ordering; Ctrl+C / Ctrl+V now respect the hovered list.
 
+[1.5.4]: https://github.com/GooseOb/music_plr/compare/v1.5.3...v1.5.4
 [1.5.3]: https://github.com/GooseOb/music_plr/compare/v1.5.2...v1.5.3
 [1.5.2]: https://github.com/GooseOb/music_plr/compare/v1.5.1...v1.5.2
 [1.5.1]: https://github.com/GooseOb/music_plr/compare/v1.5.0...v1.5.1

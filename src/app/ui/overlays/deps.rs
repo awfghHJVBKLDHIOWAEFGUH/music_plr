@@ -2,7 +2,7 @@
 
 use iced::{
     alignment,
-    widget::{checkbox, scrollable, text, Column, Space},
+    widget::{checkbox, scrollable, text, Column},
     Element,
 };
 
@@ -27,20 +27,13 @@ pub(super) fn view_dependency_dialog<'a>(
     dialog: &'a crate::app::DependencyDialog,
 ) -> Element<'a, Message, AppTheme> {
     let tr = &player.strings;
-    let python3_available = crate::deps::is_available(DepKind::Python3);
 
     let mut children: Vec<Element<'_, Message, AppTheme>> = Vec::new();
 
     let missing_rows: Vec<Element<'_, Message, AppTheme>> = dialog
         .missing
         .iter()
-        .map(|&kind| match kind {
-            DepKind::YtDlp | DepKind::Python3 => dep_checkbox_row(player, dialog, kind, None),
-            DepKind::YtMusicApi if python3_available => {
-                dep_checkbox_row(player, dialog, kind, None)
-            }
-            DepKind::YtMusicApi => dep_manual_row(player, kind, tr.deps_ytmusicapi_requires_python),
-        })
+        .map(|&kind| dep_checkbox_row(player, dialog, kind))
         .collect();
     if !missing_rows.is_empty() {
         children.push(text(tr.deps_title).size(theme::TEXT_SIZE_LG).into());
@@ -54,7 +47,7 @@ pub(super) fn view_dependency_dialog<'a>(
         let found_rows = dialog
             .found
             .iter()
-            .map(|&kind| dep_checkbox_row(player, dialog, kind, None));
+            .map(|&kind| dep_checkbox_row(player, dialog, kind));
         children.push(
             text(tr.deps_found_section_title)
                 .size(theme::TEXT_SIZE_LG)
@@ -96,15 +89,12 @@ fn dep_checkbox_row<'a>(
     player: &'a MusicPlayer,
     dialog: &'a crate::app::DependencyDialog,
     kind: DepKind,
-    note: Option<&'static str>,
 ) -> Element<'a, Message, AppTheme> {
     let tr = &player.strings;
     let checked = dialog.selected.contains(&kind);
     let op = player.dep_ops.get(&kind);
-    let status: Element<'_, Message, AppTheme> =
-        dep_install_status(op, tr).unwrap_or_else(|| Space::new().into());
 
-    let mut children: Vec<Element<'_, Message, AppTheme>> = Vec::with_capacity(4);
+    let mut children: Vec<Element<'_, Message, AppTheme>> = Vec::with_capacity(3);
     children.push(
         tr.direction
             .row([
@@ -118,30 +108,11 @@ fn dep_checkbox_row<'a>(
             .into(),
     );
     children.push(text(dep_desc(tr, kind)).style(fg_secondary()).into());
-    if let Some(note) = note {
-        children.push(text(note).style(fg_secondary()).into());
+    if let Some(status) = dep_install_status(op, tr) {
+        children.push(status);
     }
-    children.push(status);
     Column::with_children(children)
         .spacing(theme::SPACING_XS)
         .align_x(tr.direction.align())
         .into()
-}
-
-/// A non-installable dependency row (e.g. Python 3) shown with a manual hint.
-fn dep_manual_row<'a>(
-    player: &'a MusicPlayer,
-    kind: DepKind,
-    note: &'a str,
-) -> Element<'a, Message, AppTheme> {
-    Column::with_children([
-        text(kind.name()).style(fg_accent()).into(),
-        text(dep_desc(player.strings, kind))
-            .style(fg_secondary())
-            .into(),
-        text(note).style(fg_secondary()).into(),
-    ])
-    .spacing(theme::SPACING_XS)
-    .align_x(player.strings.direction.align())
-    .into()
 }

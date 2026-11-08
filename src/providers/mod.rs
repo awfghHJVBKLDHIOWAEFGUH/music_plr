@@ -469,10 +469,10 @@ impl ProviderId {
         let a = crate::deps::availability();
         match self {
             ProviderId::YouTube => ProviderCaps {
-                search: a.ytmusicapi || a.yt_dlp,
+                search: true,
                 stream: a.yt_dlp,
                 download: a.yt_dlp,
-                radio: a.ytmusicapi,
+                radio: true,
             },
             ProviderId::SoundCloud => ProviderCaps {
                 // SoundCloud search is crate-based (no external tool); only
@@ -552,8 +552,8 @@ impl ProviderId {
     }
 
     /// Whether a card tab can page past its first page. Backends whose artist/
-    /// album/playlist results come from a one-shot call (`YouTube`'s ytmusicapi
-    /// helper, Bandcamp's single search page) answer later pages empty instead.
+    /// album/playlist results come from a one-shot call (`YouTube`'s `InnerTube`
+    /// search, Bandcamp's single search page) answer later pages empty instead.
     pub fn pages_cards(self) -> bool {
         matches!(
             self,
@@ -669,18 +669,6 @@ impl SearchScope {
             SearchScope::Albums,
             SearchScope::Playlists,
         ]
-    }
-
-    /// The `filter=` argument ytmusicapi expects for this scope (YouTube-only
-    /// mapping; other providers ignore it).
-    pub fn youtube_filter(self) -> &'static str {
-        match self {
-            SearchScope::Songs => "songs",
-            SearchScope::Videos => "videos",
-            SearchScope::Artists => "artists",
-            SearchScope::Albums => "albums",
-            SearchScope::Playlists => "playlists",
-        }
     }
 }
 
@@ -806,8 +794,8 @@ pub fn search(
 /// Bandcamp/Last.fm re-run their paged track search), while a card tab is just
 /// the next page of the same scope: every provider that offers artist/album/
 /// playlist results already takes an offset there. `YouTube`'s card tabs come
-/// from ytmusicapi, which serves one page only, so it answers with an empty
-/// page and the tab is marked exhausted.
+/// from a one-shot `InnerTube` search, so it answers with an empty page and the
+/// tab is marked exhausted.
 pub fn search_more(
     provider: ProviderId,
     query: &str,
@@ -1018,9 +1006,10 @@ pub fn spawn_artist_kinds_fetch(
         } else {
             // One-shot providers: a single request answers every kind; split
             // it into per-kind payloads and send them all at once. When
-            // YouTube's popular tracks still lack durations/view counts, a
-            // yt-dlp enrichment pass runs AFTER the fan-out (it takes
-            // seconds) and resends Popular so the page never waits on it.
+            // YouTube's popular tracks still lack durations/view counts (e.g.
+            // the fallback top-songs rows), a yt-dlp enrichment pass runs AFTER
+            // the fan-out (it takes seconds) and resends Popular so the page
+            // never waits on it.
             let result = match provider {
                 ProviderId::YouTube => youtube::fetch_artist_page(&id, kinds),
                 ProviderId::MusicBrainz => musicbrainz::fetch_artist_page(&id, kinds),
@@ -1300,7 +1289,7 @@ mod tests {
             assert!(!p.pages_cards(), "{p:?}");
         }
 
-        // YouTube's card tabs come from a one-shot ytmusicapi call, so asking
+        // YouTube's card tabs come from a one-shot InnerTube search, so asking
         // for another page answers empty (which terminates the paging) without
         // reaching yt-dlp.
         let (tracks, tab) =
