@@ -3,6 +3,8 @@
 # Pushes to release-prep/** run build/package jobs only (validation).
 # Pushing a v*-tiny-skia.* tag builds and publishes a GitHub Release.
 #
+# Release outputs: four updater-compatible portable archives + SHA-256 sidecars,
+# one Windows Inno Setup installer, and one DMG for each macOS architecture.
 # Platforms (one job each):
 #   - icons         – generates .ico + .icns once (cached on app-icon.svg hash), uploads as artifact
 #   - build-linux   – Ubuntu, x86_64
