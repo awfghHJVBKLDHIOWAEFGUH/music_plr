@@ -106,6 +106,8 @@ jobs:
           # Checksum sidecar verified by the self-updater:
           # `{asset}.sha256` next to `{asset}` on the release.
           sha256sum goosemusic-x86_64-unknown-linux-gnu.tar.gz > goosemusic-x86_64-unknown-linux-gnu.tar.gz.sha256
+          tar -tzf goosemusic-x86_64-unknown-linux-gnu.tar.gz >/dev/null
+          sha256sum -c goosemusic-x86_64-unknown-linux-gnu.tar.gz.sha256
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
@@ -165,11 +167,17 @@ jobs:
             -C dist Goosemusic.app
           echo "ARCHIVE=goosemusic-${{ matrix.target }}.tar.gz" >> "$GITHUB_ENV"
           # Keep the portable archive and checksum for self-updater compatibility.
+          plutil -lint "dist/Goosemusic.app/Contents/Info.plist"
+          test -x "dist/Goosemusic.app/Contents/MacOS/goosemusic"
           sha256sum "goosemusic-${{ matrix.target }}.tar.gz" > "goosemusic-${{ matrix.target }}.tar.gz.sha256"
-          # Provide a native drag-and-drop disk image for each architecture.
+          tar -tzf "goosemusic-${{ matrix.target }}.tar.gz" >/dev/null
+          shasum -a 256 -c "goosemusic-${{ matrix.target }}.tar.gz.sha256"
+          # Provide and validate a native drag-and-drop disk image for each architecture.
           hdiutil create -volname "Goosemusic" -srcfolder "dist/Goosemusic.app" \
             -ov -format UDZO "goosemusic-${{ matrix.target }}.dmg"
+          hdiutil verify "goosemusic-${{ matrix.target }}.dmg"
           shasum -a 256 "goosemusic-${{ matrix.target }}.dmg" > "goosemusic-${{ matrix.target }}.dmg.sha256"
+          shasum -a 256 -c "goosemusic-${{ matrix.target }}.dmg.sha256"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
@@ -220,6 +228,11 @@ jobs:
           # `{asset}.sha256` next to `{asset}` on the release.
           $hash = (Get-FileHash goosemusic-x86_64-pc-windows-msvc.zip -Algorithm SHA256).Hash.ToLower()
           "$hash  goosemusic-x86_64-pc-windows-msvc.zip" | Out-File -Encoding ascii -NoNewline goosemusic-x86_64-pc-windows-msvc.zip.sha256
+          tar -tf goosemusic-x86_64-pc-windows-msvc.zip > $null
+          $zipExpected = (Get-Content goosemusic-x86_64-pc-windows-msvc.zip.sha256 -Raw).Split()[0]
+          if ($zipExpected -ne (Get-FileHash goosemusic-x86_64-pc-windows-msvc.zip -Algorithm SHA256).Hash.ToLower()) {
+            throw "Portable ZIP checksum verification failed"
+          }
 
           # Build a per-user Windows installer while retaining the portable ZIP.
           $version = (Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"').Matches[0].Groups[1].Value
@@ -236,6 +249,10 @@ jobs:
           if (!(Test-Path $installer)) { throw "Expected installer was not created: $installer" }
           $installerHash = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLower()
           "$installerHash  goosemusic-setup-x86_64-pc-windows-msvc.exe" | Out-File -Encoding ascii -NoNewline "$installer.sha256"
+          $installerExpected = (Get-Content "$installer.sha256" -Raw).Split()[0]
+          if ($installerExpected -ne (Get-FileHash $installer -Algorithm SHA256).Hash.ToLower()) {
+            throw "Windows installer checksum verification failed"
+          }
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
