@@ -567,6 +567,12 @@ mod tests {
     }
 
     #[test]
+    fn embedded_release_tag_matches_build_environment() {
+        if let Some(expected) = option_env!("GOOSE_RELEASE_TAG").filter(|tag| !tag.is_empty()) {
+            assert_eq!(APP_RELEASE_TAG, expected);
+        }
+    }
+
     fn github_release_response_parses_tag() {
         let body = r#"{"tag_name":"v1.5.1-tiny-skia.1","draft":false,"prerelease":false}"#;
         let parsed: GitHubReleaseResponse = serde_json::from_str(body).unwrap();
