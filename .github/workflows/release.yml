@@ -88,6 +88,7 @@ jobs:
       - name: Build
         env:
           CARGO_PROFILE_RELEASE_STRIP: "true"
+          GOOSE_RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
         run: cargo build --release --locked --target x86_64-unknown-linux-gnu
 
       - name: Package
@@ -140,6 +141,7 @@ jobs:
       - name: Build
         env:
           CARGO_PROFILE_RELEASE_STRIP: "true"
+          GOOSE_RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
         run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Build .app bundle
@@ -155,9 +157,12 @@ jobs:
           tar -czf goosemusic-${{ matrix.target }}.tar.gz \
             -C dist Goosemusic.app
           echo "ARCHIVE=goosemusic-${{ matrix.target }}.tar.gz" >> "$GITHUB_ENV"
-          # Checksum sidecar verified by the self-updater:
-          # `{asset}.sha256` next to `{asset}` on the release.
+          # Keep the portable archive and checksum for self-updater compatibility.
           sha256sum "goosemusic-${{ matrix.target }}.tar.gz" > "goosemusic-${{ matrix.target }}.tar.gz.sha256"
+          # Provide a native drag-and-drop disk image for each architecture.
+          hdiutil create -volname "Goosemusic" -srcfolder "dist/Goosemusic.app" \
+            -ov -format UDZO "goosemusic-${{ matrix.target }}.dmg"
+          shasum -a 256 "goosemusic-${{ matrix.target }}.dmg" > "goosemusic-${{ matrix.target }}.dmg.sha256"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
@@ -166,6 +171,8 @@ jobs:
           path: |
             ${{ env.ARCHIVE }}
             ${{ env.ARCHIVE }}.sha256
+            goosemusic-${{ matrix.target }}.dmg
+            goosemusic-${{ matrix.target }}.dmg.sha256
           if-no-files-found: error
 
   build-windows:
@@ -194,6 +201,7 @@ jobs:
       - name: Build
         env:
           CARGO_PROFILE_RELEASE_STRIP: "false"
+          GOOSE_RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
         run: cargo build --release --locked --target x86_64-pc-windows-msvc
 
       - name: Package
@@ -206,6 +214,22 @@ jobs:
           $hash = (Get-FileHash goosemusic-x86_64-pc-windows-msvc.zip -Algorithm SHA256).Hash.ToLower()
           "$hash  goosemusic-x86_64-pc-windows-msvc.zip" | Out-File -Encoding ascii -NoNewline goosemusic-x86_64-pc-windows-msvc.zip.sha256
 
+          # Build a per-user Windows installer while retaining the portable ZIP.
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"').Matches[0].Groups[1].Value
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (!(Test-Path $iscc)) {
+            choco install innosetup --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw "Inno Setup installation failed" }
+          }
+          if (!(Test-Path $iscc)) { throw "Inno Setup compiler not found: $iscc" }
+          New-Item -ItemType Directory -Force dist | Out-Null
+          & $iscc "/DMyAppVersion=$version" "windows/goosemusic.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed" }
+          $installer = "dist/goosemusic-setup-x86_64-pc-windows-msvc.exe"
+          if (!(Test-Path $installer)) { throw "Expected installer was not created: $installer" }
+          $installerHash = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLower()
+          "$installerHash  goosemusic-setup-x86_64-pc-windows-msvc.exe" | Out-File -Encoding ascii -NoNewline "$installer.sha256"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
@@ -213,6 +237,8 @@ jobs:
           path: |
             goosemusic-x86_64-pc-windows-msvc.zip
             goosemusic-x86_64-pc-windows-msvc.zip.sha256
+            dist/goosemusic-setup-x86_64-pc-windows-msvc.exe
+            dist/goosemusic-setup-x86_64-pc-windows-msvc.exe.sha256
           if-no-files-found: error
 
   release:
@@ -270,11 +296,11 @@ jobs:
           These binaries are built from the TinySkia fork, not the upstream GooseMusic releases.
 
           - **Linux x86_64:** extract the `.tar.gz` archive and run `goosemusic`. The archive also includes the desktop entry and SVG icon.
-          - **Windows x86_64:** extract the `.zip` archive and run `goosemusic.exe`.
-          - **macOS Apple Silicon:** extract the `aarch64-apple-darwin` archive and move `Goosemusic.app` into Applications.
-          - **macOS Intel:** extract the `x86_64-apple-darwin` archive and move `Goosemusic.app` into Applications.
+          - **Windows x86_64:** run the Inno Setup installer, or extract the portable `.zip` archive and run `goosemusic.exe`.
+          - **macOS Apple Silicon:** open the `aarch64-apple-darwin.dmg` or extract its portable `.tar.gz` archive.
+          - **macOS Intel:** open the `x86_64-apple-darwin.dmg` or extract its portable `.tar.gz` archive.
 
-          SHA256 checksum files are provided alongside each archive.
+          SHA256 checksum files are provided alongside every portable archive and installer image.
 
           ## Runtime prerequisites
 

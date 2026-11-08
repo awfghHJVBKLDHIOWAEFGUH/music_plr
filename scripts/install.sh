@@ -2,7 +2,7 @@
 # install.sh — one-command installer for Goosemusic.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/GooseOb/music_plr/master/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/awfghHJVBKLDHIOWAEFGUH/music_plr/release-prep/tiny-skia-v1.5.1/scripts/install.sh | bash
 #
 # Installs to:
 #   Linux:   ~/.local/bin/goosemusic  + desktop integration files
@@ -10,7 +10,7 @@
 #   Windows: not supported (use the .zip from GitHub Releases)
 set -euo pipefail
 
-REPO="GooseOb/music_plr"
+REPO="awfghHJVBKLDHIOWAEFGUH/music_plr"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 
 red() { printf '\033[1;31m%s\033[0m\n' "$*" >&2; }
@@ -35,7 +35,7 @@ detect_rust_target() {
 	Linux*) os="unknown-linux-gnu" ;;
 	Darwin*) os="apple-darwin" ;;
 	MINGW* | MSYS* | CYGWIN*)
-		err "Windows is not supported by this script. Download the .zip from:
+		err "Windows is not supported by this script. Download the installer or portable .zip from:
   https://github.com/$REPO/releases/latest"
 		;;
 	*) err "unsupported OS: $(uname -s)" ;;
@@ -57,7 +57,7 @@ download_release() {
 
 	case "$target" in
 	*-unknown-linux-gnu) asset_name="goosemusic-${target}.tar.gz" ;;
-	*-apple-darwin) asset_name="Goosemusic-${target}.tar.gz" ;;
+	*-apple-darwin) asset_name="goosemusic-${target}.tar.gz" ;;
 	*) err "unsupported target: $target" ;;
 	esac
 
