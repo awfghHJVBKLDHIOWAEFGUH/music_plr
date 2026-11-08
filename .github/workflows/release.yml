@@ -229,7 +229,8 @@ jobs:
           $hash = (Get-FileHash goosemusic-x86_64-pc-windows-msvc.zip -Algorithm SHA256).Hash.ToLower()
           "$hash  goosemusic-x86_64-pc-windows-msvc.zip" | Out-File -Encoding ascii -NoNewline goosemusic-x86_64-pc-windows-msvc.zip.sha256
           tar -tf goosemusic-x86_64-pc-windows-msvc.zip > $null
-          $zipExpected = (Get-Content goosemusic-x86_64-pc-windows-msvc.zip.sha256 -Raw).Split()[0]
+          if ($LASTEXITCODE -ne 0) { throw "Portable ZIP archive verification failed" }
+          $zipExpected = ((Get-Content goosemusic-x86_64-pc-windows-msvc.zip.sha256 -Raw) -split '\s+')[0]
           if ($zipExpected -ne (Get-FileHash goosemusic-x86_64-pc-windows-msvc.zip -Algorithm SHA256).Hash.ToLower()) {
             throw "Portable ZIP checksum verification failed"
           }
@@ -249,7 +250,7 @@ jobs:
           if (!(Test-Path $installer)) { throw "Expected installer was not created: $installer" }
           $installerHash = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLower()
           "$installerHash  goosemusic-setup-x86_64-pc-windows-msvc.exe" | Out-File -Encoding ascii -NoNewline "$installer.sha256"
-          $installerExpected = (Get-Content "$installer.sha256" -Raw).Split()[0]
+          $installerExpected = ((Get-Content "$installer.sha256" -Raw) -split '\s+')[0]
           if ($installerExpected -ne (Get-FileHash $installer -Algorithm SHA256).Hash.ToLower()) {
             throw "Windows installer checksum verification failed"
           }
