@@ -573,6 +573,7 @@ mod tests {
         }
     }
 
+    #[test]
     fn github_release_response_parses_tag() {
         let body = r#"{"tag_name":"v1.5.1-tiny-skia.1","draft":false,"prerelease":false}"#;
         let parsed: GitHubReleaseResponse = serde_json::from_str(body).unwrap();
