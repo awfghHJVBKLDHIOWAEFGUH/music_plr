@@ -92,7 +92,7 @@ The release tarball includes a `.desktop` file and icon. After extracting:
 ```sh
 cp goosemusic ~/.local/bin/
 cp goosemusic.desktop ~/.local/share/applications/
-cp icons/logo.svg ~/.local/share/icons/goosemusic.svg
+cp icons/app-icon.svg ~/.local/share/icons/goosemusic.svg
 ```
 
 #### macOS

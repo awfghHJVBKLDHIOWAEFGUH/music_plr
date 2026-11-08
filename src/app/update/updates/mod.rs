@@ -558,7 +558,10 @@ mod tests {
         assert!(version_gt("v1.5.2-tiny-skia.1", "v1.5.1-tiny-skia.1"));
         assert!(version_gt("v1.5.1-tiny-skia.2", "v1.5.1-tiny-skia.1"));
         assert!(version_gt("1.3.6", "1.3.5"));
-        assert!(!version_gt("v1.5.1-tiny-skia.1", "1.5.1"));
+        // A branch build at 1.5.1 should see the first tagged fork release.
+        assert!(version_gt("v1.5.1-tiny-skia.1", "1.5.1"));
+        assert_eq!(parse_release_key("v1.5.1-tiny-skia.1"), Some((1, 5, 1, 1)));
+        assert_eq!(parse_release_key("v1.5.1"), Some((1, 5, 1, 0)));
         assert!(!version_gt("v1.5.1-tiny-skia.1", "v1.5.1-tiny-skia.1"));
         assert!(!version_gt("1.3.4", "1.3.5"));
     }
