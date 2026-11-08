@@ -13,11 +13,11 @@ DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
-OutputDir=dist
+OutputDir=..\dist
 OutputBaseFilename=goosemusic-setup-x86_64-pc-windows-msvc
-SetupIconFile=windows/app.ico
+SetupIconFile=app.ico
 UninstallDisplayIcon={app}\goosemusic.exe
-LicenseFile=LICENSE
+LicenseFile=..\LICENSE
 WizardStyle=modern
 Compression=lzma2
 SolidCompression=yes
@@ -26,7 +26,7 @@ SolidCompression=yes
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"; Flags: unchecked
 
 [Files]
-Source: "target\x86_64-pc-windows-msvc\release\goosemusic.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\target\x86_64-pc-windows-msvc\release\goosemusic.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\Goosemusic"; Filename: "{app}\goosemusic.exe"
