@@ -19,6 +19,16 @@ auto-generated compare link below it.
 - Home page is supported as now playing source.
 - Translations.
 
+## [1.5.1-tiny-skia.1] - 2026-11-08
+
+### Changed
+
+- First TinySkia-based fork build, based on GooseMusic v1.5.1.
+
+### Fixed
+
+- The updater compares available releases against the embedded fork release tag, preventing an installed release from offering itself as an update.
+
 ## [1.5.0] - 2026-11-05
 
 ### Added
@@ -148,7 +158,7 @@ Plain lyrics are now displayed correctly when synced lyrics are not available.
 
 ## [1.3.10] - 2026-10-06
 
-### Fixed
+### Added
 
 - "Go to artist" on a regular youtube channel now opens the artist page with channel data instead of showing errors.
 - "Most popular songs" on YouTube artist pages now shows play counts and durations instead of hiding them.
