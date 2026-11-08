@@ -16,6 +16,10 @@
 # (https://github.com/cross-rs/cross) on ubuntu-latest.
 name: Release
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches:
