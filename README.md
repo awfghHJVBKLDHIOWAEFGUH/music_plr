@@ -1,61 +1,42 @@
 # GooseMusic TinySkia
 
-A GooseMusic v1.5.1 fork using Iced's TinySkia renderer. The point of this branch was to get TinySkia working without changing the rest of the app.
+This repository is an independent TinySkia fork of GooseMusic, currently based on GooseMusic v1.5.5 and using Iced's TinySkia renderer. The goal of this fork is to get TinySkia working without changing the rest of the app.
 
-The renderer changes are on [tiny-skia-v1.5.1](https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr/tree/tiny-skia-v1.5.1).
+The v1.5.5 renderer changes are on [release-prep/tiny-skia-v1.5.5](https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr/tree/release-prep/tiny-skia-v1.5.5).
 
 ## Changes
 
-- Based on GooseMusic v1.5.1, upstream commit `e1d27d8e`.
+- Based on GooseMusic `v1.5.5`.
 - Uses Iced `0.14`.
+- Resolves `iced_tiny_skia 0.14.1` and `tiny-skia 0.11.4`.
 - Enables the Iced `tiny-skia` feature.
-- Removes the explicit Iced `wgpu` feature.
+- Removes the single explicit Iced `wgpu` feature.
 - Keeps `image`, `svg`, `tokio`, `canvas`, `advanced`, `crisp`, `web-colors`, `thread-pool`, `x11`, and `wayland`.
 - Updates `Cargo.lock`.
+- Incorporates the upstream v1.5.2–v1.5.5 changes, including the InnerTube migration that replaces the Python/`ytmusicapi` search path and multi-author tracks.
+- Retains the fork's GitHub Releases updater and cross-platform release packaging.
 
-The migration commit changes `Cargo.toml` and `Cargo.lock`. The lockfile diff is 14 insertions and 332 deletions. WGPU-related packages can still appear in the lockfile. We removed the explicit Iced WGPU feature, not necessarily every WGPU-related dependency.
+The v1.5.5 migration changes `Cargo.toml` and `Cargo.lock` for the renderer, plus the fork updater, release packaging, and documentation. The lockfile diff is 13 insertions and 315 deletions. WGPU-only package records were dropped; a few inactive WGPU-named records remain. No WGPU crate is in the active dependency graph or the release binary.
+
+The fork's release pipeline publishes Linux, macOS, and Windows assets with SHA-256 sidecars, macOS DMGs, and a Windows Inno Setup installer, and creates draft GitHub Releases.
 
 ## Memory usage
 
-We measured process memory using `/proc/<pid>/smaps_rollup` and process status information.
-
-| Build | RSS | PSS |
-| --- | ---: | ---: |
-| Original, without TinySkia | 126,816 kB (123.8 MiB) | 85,354 kB (83.4 MiB) |
-| TinySkia | 51,980 kB (50.8 MiB) | 40,444 kB (39.5 MiB) |
-
-A later TinySkia reading during playback was 56,520 kB RSS (55.2 MiB) and 45,563 kB PSS (44.5 MiB).
-
-These are readings from my tests, not a formal benchmark. The original build was measured idle, while the first TinySkia reading was taken during playback, so the workloads were not identical. The numbers are useful as observed memory usage, but should not be treated as a controlled head-to-head result.
+No controlled memory benchmark has been recorded for v1.5.5. This release does not claim a memory improvement over upstream GooseMusic v1.5.5.
 
 ## Build and testing
 
-The optimized release build completed in about 2 minutes 30 seconds on the test machine.
+The v1.5.5 migration branch passes `cargo metadata --locked --no-deps`, `cargo check --locked`, and the fork updater tests. An optimized release build (`cargo build --release --locked`) completed successfully on Linux x86_64 with LTO, `codegen-units = 1`, `panic = "abort"`, and stripping enabled. The resulting binary contains no WGPU components.
 
-I tested:
-- Audio playback
-- Album artwork
-- Mosaic rendering
-- SVG rendering
-
-All four worked on my CachyOS setup.
-
-Test machine:
-- CachyOS
-- Wayland with Hyprland
-- Intel Core i5-12400T
-- Intel UHD Graphics 730
-- 16 GB RAM
-
-This was tested on one machine. I did not run a cross-platform test matrix or a controlled FPS benchmark.
+The renderer configuration used by v1.5.5 is the same one that passed local runtime checks for audio playback, album artwork, mosaic rendering, and SVG rendering. Validation remains local, not a cross-platform test matrix; no FPS, memory, or speed improvement is claimed.
 
 ## Cross-platform compatibility
 
-I'm roughly **90% confident** that cross-platform compatibility should remain intact. That's my engineering estimate based on how limited the change was, not a measured compatibility rate.
+For v1.5.5, cross-platform compatibility is expected but not confirmed. I have not tested Windows, macOS, or other Linux distributions for this release, so no measured compatibility rate is claimed.
 
-I only changed the renderer configuration. I enabled Iced's TinySkia feature and removed the explicit Iced `wgpu` feature. I left the audio, providers, playback, media controls, file handling, and platform-specific application code alone. The existing X11 and Wayland features are still enabled.
+The renderer change is still limited to configuration: I enabled Iced's TinySkia feature and removed the explicit Iced `wgpu` feature. I left the upstream audio, providers, playback, media controls, file handling, and platform-specific application code alone. The upstream v1.5.2–v1.5.5 integration comes from GooseMusic upstream. The existing X11 and Wayland features are still enabled.
 
-Basically, I changed how the interface is drawn, not how the app plays music or connects to providers. The build and runtime checks passed on my CachyOS machine. I haven't tested Windows, macOS, or other Linux distributions after this change, so compatibility on those platforms is expected, but not confirmed.
+Basically, I changed how the interface is drawn, not how the app plays music or connects to providers. The build and runtime checks passed on Linux x86_64. Compatibility on Windows, macOS, and other Linux distributions is expected, but not confirmed.
 
 ## Known issue
 
@@ -66,15 +47,18 @@ Very long track titles can sometimes overlap the next row in the upright track l
 You need the Rust toolchain.
 
 ```bash
-git clone --branch tiny-skia-v1.5.1 https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr.git
+git clone --branch release-prep/tiny-skia-v1.5.5 https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr.git
 cd music_plr
-cargo build --release
+cargo build --release --locked
 ```
 
 The binary is in `target/release/`.
 
+Prebuilt `v1.5.5-tiny-skia.1` assets are available on [GitHub Releases](https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr/releases), including Linux and macOS install assets and the Windows installer.
+
 ## Links
 
-- [TinySkia branch](https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr/tree/tiny-skia-v1.5.1)
-- [Migration commit 614e954](https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr/commit/614e9543932a94b0ff5a1498bd219fb095c2604e)
+- [TinySkia v1.5.5 branch](https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr/tree/release-prep/tiny-skia-v1.5.5)
+- [TinySkia v1.5.5 migration commit 6b88926](https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr/commit/6b88926036a1e957a0b2c588be784cccdace2908)
+- [Release v1.5.5-tiny-skia.1](https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr/releases/tag/v1.5.5-tiny-skia.1)
 - [Original GooseMusic project](https://github.com/GooseOb/music_plr)
