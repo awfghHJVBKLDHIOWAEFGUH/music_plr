@@ -37,7 +37,7 @@ pub(super) fn view_main_content(
                 r.provider,
                 &r.name,
                 &r.id,
-                browse_meta(&r.badge, &r.date),
+                browse_meta(&r.meta.badge, &r.meta.date),
             ),
             ViewKind::PlaylistView(r) => {
                 if crate::providers::playlists_supported(r.provider) {

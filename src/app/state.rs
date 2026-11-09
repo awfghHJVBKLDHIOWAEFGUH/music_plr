@@ -16,7 +16,7 @@ use crate::{
         dialog::Dialog,
         interaction::{DragState, TrackListSearch, TrackPos},
         message::{BackendResult, Message},
-        pane::{Pane, PaneId, SplitNode},
+        pane::{Pane, PaneId},
         ui,
         update::operation::CaptureBounds,
         view_data::{RequestIdGenerator, ViewData},
@@ -25,15 +25,15 @@ use crate::{
     data::{
         cache::StreamCache, config::Config, custom_providers::CustomProviderStore,
         downloads::DownloadRegistry, library::LibraryStore, playlists::PlaylistStore,
-        search_history::SearchHistory, thumbnails::ThumbnailIndex, JsonStore,
+        search_history::SearchHistory, session::SessionState, thumbnails::ThumbnailIndex,
+        JsonStore,
     },
     i18n::Strings,
     load_state::LoadState,
-    lyrics::LyricsProvider,
     media_controls::{MediaControlEvent, MediaUpdate},
     providers::ProviderId,
     theme::{AppTheme, Palette},
-    types::{PlayQueue, Track},
+    types::Track,
 };
 
 #[derive(Clone)]
@@ -98,25 +98,14 @@ pub struct MusicPlayer {
     pub custom_providers: CustomProviderStore,
     pub custom_provider_form: Option<CustomProviderForm>,
     pub strings: &'static Strings,
-    /// Tiled main-view panes. Each pane owns its navigation history,
-    /// search-bar state, and lyrics overlay; `split_root` arranges them and
-    /// `focused_pane_id` receives ambiguous global actions (sidebar clicks,
-    /// keyboard navigation).
-    pub panes: std::collections::HashMap<PaneId, Pane>,
-    pub split_root: SplitNode,
-    pub focused_pane_id: PaneId,
+    /// The materialized session: tiled panes, queue, playback settings and the
+    /// now-playing snapshot. It is the live state, not a save-time copy, so
+    /// `flush_session` only has to persist it.
+    pub session: SessionState,
     pub next_pane_id: PaneId,
     pub request_ids: RequestIdGenerator,
 
-    pub queue: PlayQueue,
-    pub show_queue: bool,
-    pub repeat: bool,
-    /// Default lyrics provider for newly opened lyrics panes. Each pane
-    /// remembers its own selection in `LyricsState::provider`.
-    pub lyrics_provider: LyricsProvider,
-
     pub is_playing: bool,
-    pub volume: f32,
     /// Playback anchor: fraction at `progress_at`. The live position is
     /// `playback_progress()` (anchor + wall clock while playing), drawn by
     /// the progress bar straight from the clock — no polling needed.
@@ -165,7 +154,10 @@ pub struct MusicPlayer {
     pub dialog: Option<Dialog>,
 
     pub library: LibraryStore,
-    pub library_expanded: bool,
+    /// Fetched provider lyrics and user-authored custom entries, keyed by
+    /// track. Held in memory like every other store; the view reads it without
+    /// touching the disk.
+    pub lyrics_cache: crate::data::lyrics_cache::LyricsCache,
 
     pub search_history: SearchHistory,
     pub stream_cache: StreamCache,
@@ -213,8 +205,6 @@ pub struct MusicPlayer {
     pub translation_models: Option<LoadState<Vec<String>>>,
     /// Session-only substring filter for the fetched translation model list.
     pub translation_models_filter: String,
-
-    pub now_playing_from: Option<ViewData>,
 
     pub track_list_search: Option<TrackListSearch>,
 
@@ -299,7 +289,6 @@ impl MusicPlayer {
             .copied()
             .filter(|k| crate::deps::is_available(*k) && !crate::deps::installed_via_app(*k))
             .collect();
-        let panes = std::collections::HashMap::from([(0, Pane::new(0))]);
         let mut player = Self {
             audio: AudioPlayer::new(0.8),
             search_history: SearchHistory::load(),
@@ -307,17 +296,12 @@ impl MusicPlayer {
             pending_cache_id: None,
             normalization_cache: crate::audio::load_gains(),
             pending_normalization_id: None,
-            lyrics_provider: LyricsProvider::default(),
             config,
             custom_providers,
             custom_provider_form: None,
-            panes,
-            split_root: SplitNode::Leaf(0),
-            focused_pane_id: 0,
+            session: SessionState::default(),
             next_pane_id: 1,
-            queue: PlayQueue::new(),
             is_playing: false,
-            volume: 0.8,
             progress: 0.0,
             progress_at: Instant::now(),
             duration: 0.0,
@@ -333,14 +317,12 @@ impl MusicPlayer {
             play_after_browse: std::collections::HashSet::new(),
             trashbin: crate::data::trashbin::TrashStore::load(),
             playlist_create_name: String::new(),
-            show_queue: false,
-            repeat: false,
             thumbnail_index: ThumbnailIndex::load(),
             home_cache: crate::data::home_cache::HomeCache::load(),
             dialog: (!missing_deps.is_empty())
                 .then(|| Dialog::Dependencies(DependencyDialog::new(missing_deps, found_deps))),
             library: LibraryStore::load(),
-            library_expanded: false,
+            lyrics_cache: crate::data::lyrics_cache::LyricsCache::load_migrated(),
             request_ids: RequestIdGenerator::default(),
             result_tx,
             result_rx,
@@ -360,7 +342,6 @@ impl MusicPlayer {
             recent_selected_indices: Vec::new(),
             translation_models: None,
             translation_models_filter: String::new(),
-            now_playing_from: None,
             track_list_search: None,
             app_theme,
             bounds: CaptureBounds::default(),
@@ -400,17 +381,17 @@ impl MusicPlayer {
 
     #[inline]
     pub fn pane(&self, id: PaneId) -> &Pane {
-        &self.panes[&id]
+        &self.session.panes[&id]
     }
 
     #[inline]
     pub fn pane_mut(&mut self, id: PaneId) -> &mut Pane {
-        self.panes.get_mut(&id).expect("unknown pane")
+        self.session.panes.get_mut(&id).expect("unknown pane")
     }
 
     #[inline]
     pub fn focused_pane(&self) -> &Pane {
-        self.pane(self.focused_pane_id)
+        self.pane(self.session.focused)
     }
 
     /// Reset to a deterministic single pane for tests. `new_with` restores
@@ -418,11 +399,11 @@ impl MusicPlayer {
     #[cfg(test)]
     pub(crate) fn reset_test_pane(&mut self, history: Vec<ViewData>) {
         let mut pane = Pane::new(0);
-        pane.nav_history = history;
+        pane.nav_history = history.into_iter().map(std::sync::Arc::new).collect();
         pane.nav_history_pos = 0;
-        self.panes = std::collections::HashMap::from([(0, pane)]);
-        self.split_root = SplitNode::Leaf(0);
-        self.focused_pane_id = 0;
+        self.session.panes = std::collections::HashMap::from([(0, pane)]);
+        self.session.root = crate::app::pane::SplitNode::Leaf(0);
+        self.session.focused = 0;
         self.next_pane_id = 1;
     }
 
@@ -436,7 +417,7 @@ impl MusicPlayer {
     /// that only need an owned snapshot (so `self` can be mutated while
     /// iterating).
     pub fn pane_ids_unsorted(&self) -> Vec<PaneId> {
-        self.panes.keys().copied().collect()
+        self.session.panes.keys().copied().collect()
     }
 
     /// Borrow a pane's active view state (its live
@@ -465,7 +446,7 @@ impl MusicPlayer {
     /// [`Self::view_data_in_mut`] when a pane id is already at hand.
     #[inline]
     pub fn view_data_mut(&mut self) -> &mut ViewData {
-        let id = self.focused_pane_id;
+        let id = self.session.focused;
         self.view_data_in_mut(id)
     }
 

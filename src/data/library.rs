@@ -7,8 +7,9 @@ use crate::providers::ProviderId;
 
 /// What kind of thing a [`LibraryItem`] represents. Distinguishes the three
 /// saveable entity types so the saved list and lookups can be grouped/filtered.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum LibraryKind {
+    #[default]
     Album,
     Artist,
     Playlist,
@@ -25,13 +26,13 @@ impl LibraryKind {
     }
 }
 
-/// A single saved library entry. Mirrors the fields of a `CardData` plus the
-/// kind, so a saved item can be dragged (onto the playlist list or library)
-/// or opened via the card-press mechanism. `provider` records which provider
-/// supplied `id`, so reopening the item hits the right backend. `url` is the
-/// public page the provider advertised, empty for providers that expose no
-/// page address (the entry is then not offered "Open in browser").
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// A single saved library entry and the shared identity every card carries.
+/// A saved item can be dragged (onto the playlist list or library) or opened
+/// via the card-press mechanism. `provider` records which provider supplied
+/// `id`, so reopening the item hits the right backend. `url` is the public page
+/// the provider advertised, empty for providers that expose no page address
+/// (the entry is then not offered "Open in browser").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct LibraryItem {
     pub kind: LibraryKind,
     pub id: String,
@@ -44,25 +45,21 @@ pub struct LibraryItem {
 }
 
 impl LibraryItem {
+    /// The borrowed card identity of this item.
+    pub fn card_ref(&self) -> CardRef<'_> {
+        CardRef {
+            kind: self.kind,
+            provider: self.provider,
+            id: &self.id,
+            title: &self.title,
+            thumbnail: &self.thumbnail,
+            url: &self.url,
+        }
+    }
+
     /// The public web page for this card, when the provider advertised one.
     pub fn web_url(&self) -> Option<&str> {
         (!self.url.is_empty()).then_some(self.url.as_str())
-    }
-
-    /// Build a library entry from a provider card.
-    pub fn from_card_data(
-        card: &crate::providers::CardData,
-        kind: LibraryKind,
-        provider: ProviderId,
-    ) -> Self {
-        Self {
-            kind,
-            id: card.id.clone(),
-            title: card.title.clone(),
-            thumbnail: card.thumbnail.clone(),
-            provider,
-            url: card.url.clone(),
-        }
     }
 }
 
@@ -106,6 +103,17 @@ impl From<CardRef<'_>> for LibraryItem {
 /// the strings inside it. `Arc` (not `Rc`) because [`Message`](crate::app::Message)
 /// has to stay `Send`.
 pub type Card = Arc<LibraryItem>;
+
+/// The flat fields a v1.5.4 card carried, before cards grew a shared identity.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub(crate) struct LegacyCardFields {
+    pub id: String,
+    #[serde(alias = "name")]
+    pub title: String,
+    pub thumbnail: String,
+    pub url: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LibraryStore {

@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 
 use crate::{
+    data::library::LibraryKind,
     providers::{
         AlbumMeta, ArtistAlbumCard, ArtistHeader, ArtistPage, CardData, ProviderId, SearchScope,
         SearchTab,
@@ -123,7 +124,7 @@ fn fetch_artist(id: &str) -> Result<bandcamp::Artist> {
 
 pub fn search(query: &str, scope: SearchScope, offset: usize) -> Result<(Vec<Track>, SearchTab)> {
     if offset > 0 {
-        return Ok((Vec::new(), SearchTab::from_scope(scope)));
+        return Ok((Vec::new(), scope.into()));
     }
     let items = block_on(bandcamp::search(query))?;
     match scope {
@@ -131,13 +132,15 @@ pub fn search(query: &str, scope: SearchScope, offset: usize) -> Result<(Vec<Tra
             let cards = items
                 .iter()
                 .filter_map(|item| match item {
-                    bandcamp::SearchResultItem::Artist(a) => Some(CardData {
-                        url: a.url.clone(),
-                        id: a.url.clone(),
-                        title: a.name.clone(),
-                        subtitle: a.location.clone().unwrap_or_default(),
-                        thumbnail: sized_thumb!(a.image),
-                    }),
+                    bandcamp::SearchResultItem::Artist(a) => Some(CardData::new(
+                        LibraryKind::Artist,
+                        ProviderId::Bandcamp,
+                        a.url.clone(),
+                        a.name.clone(),
+                        a.location.clone().unwrap_or_default(),
+                        sized_thumb!(a.image),
+                        a.url.clone(),
+                    )),
                     _ => None,
                 })
                 .take(SEARCH_PAGE_SIZE)
@@ -148,13 +151,15 @@ pub fn search(query: &str, scope: SearchScope, offset: usize) -> Result<(Vec<Tra
             let cards = items
                 .iter()
                 .filter_map(|item| match item {
-                    bandcamp::SearchResultItem::Album(a) => Some(CardData {
-                        url: a.url.item_url.clone(),
-                        id: format!("{}:{}:a", a.band_id, a.album_id),
-                        title: a.name.clone(),
-                        subtitle: a.band_name.clone(),
-                        thumbnail: sized_thumb!(a.image),
-                    }),
+                    bandcamp::SearchResultItem::Album(a) => Some(CardData::new(
+                        LibraryKind::Album,
+                        ProviderId::Bandcamp,
+                        format!("{}:{}:a", a.band_id, a.album_id),
+                        a.name.clone(),
+                        a.band_name.clone(),
+                        sized_thumb!(a.image),
+                        a.url.item_url.clone(),
+                    )),
                     _ => None,
                 })
                 .take(SEARCH_PAGE_SIZE)
@@ -228,7 +233,7 @@ pub fn home_sections() -> Result<Vec<crate::providers::HomeSection>> {
     ))
 }
 
-fn discover_new(limit: usize) -> Result<Vec<crate::providers::HomeCard>> {
+fn discover_new(limit: usize) -> Result<Vec<CardData>> {
     let body = super::http_agent()
         .get("https://bandcamp.com/api/discover/3/get_web?g=all&s=new&p=0&gn=0&f=all")
         .header("User-Agent", "goosemusic/0.1")
@@ -271,15 +276,15 @@ fn discover_new(limit: usize) -> Result<Vec<crate::providers::HomeCard>> {
             .and_then(serde_json::Value::as_u64)
             .map(|art| format!("https://f4.bcbits.com/img/a{art:010}_4.jpg"))
             .unwrap_or_default();
-        cards.push(crate::providers::HomeCard {
-            kind: crate::data::library::LibraryKind::Album,
-            provider: ProviderId::Bandcamp,
-            id: format!("{band_id}:{album_id}:a"),
+        cards.push(CardData::new(
+            LibraryKind::Album,
+            ProviderId::Bandcamp,
+            format!("{band_id}:{album_id}:a"),
             title,
-            subtitle: artist.unwrap_or_default(),
+            artist.unwrap_or_default(),
             thumbnail,
-            url: album_page_url(item).unwrap_or_default(),
-        });
+            album_page_url(item).unwrap_or_default(),
+        ));
         if cards.len() >= limit {
             break;
         }
@@ -395,19 +400,16 @@ pub fn fetch_artist_page(
             .iter()
             .map(|e| {
                 let single = matches!(e.item_type, bandcamp::ArtistDiscographyEntryType::Track);
-                ArtistAlbumCard {
-                    id: format!("{}:{}:{}", e.band_id, e.id, if single { "t" } else { "a" }),
-                    title: e.title.clone(),
-                    date: e.release_date.format("%Y").to_string(),
-                    badge: if single {
-                        "Single".to_string()
-                    } else {
-                        "Album".to_string()
-                    },
-                    thumbnail: sized_thumb!(e.image),
+                ArtistAlbumCard::new(
+                    ProviderId::Bandcamp,
+                    format!("{}:{}:{}", e.band_id, e.id, if single { "t" } else { "a" }),
+                    e.title.clone(),
+                    if single { "Single" } else { "Album" },
+                    e.release_date.format("%Y").to_string(),
+                    sized_thumb!(e.image),
                     // Discography entries carry no page address.
-                    url: String::new(),
-                }
+                    "",
+                )
             })
             .collect();
     }

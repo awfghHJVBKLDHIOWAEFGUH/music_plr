@@ -56,16 +56,21 @@ impl From<QueueTab> for PaneId {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Pane {
     pub id: PaneId,
-    pub nav_history: Vec<ViewData>,
+    /// History entries are shared: the active view is also the "now playing
+    /// from" snapshot, and a push or Back/Forward only moves a refcount.
+    pub nav_history: Vec<std::sync::Arc<ViewData>>,
     pub nav_history_pos: usize,
     pub search_query: String,
     pub search_scope: SearchScope,
     pub search_provider: ProviderId,
+    #[serde(skip)]
     pub show_search_history: bool,
+    #[serde(skip)]
     pub last_filtered_history: Vec<String>,
+    #[serde(skip)]
     pub lyrics: Option<LyricsState>,
 }
 
@@ -73,7 +78,7 @@ impl Pane {
     pub fn new(id: PaneId) -> Self {
         Self {
             id,
-            nav_history: vec![ViewData::default()],
+            nav_history: vec![std::sync::Arc::new(ViewData::default())],
             nav_history_pos: 0,
             search_query: String::new(),
             search_scope: SearchScope::Songs,
@@ -87,12 +92,33 @@ impl Pane {
         }
     }
 
+    /// A pane landing on Home, the boot default when no session exists.
+    pub fn home(id: PaneId) -> Self {
+        Self {
+            nav_history: vec![std::sync::Arc::new(ViewData::new_home())],
+            ..Self::new(id)
+        }
+    }
+
     pub fn view_data(&self) -> &ViewData {
         &self.nav_history[self.nav_history_pos]
     }
 
+    /// The active entry as a shared handle, for snapshots that must not keep
+    /// the view alive through a deep copy.
+    pub fn view_data_arc(&self) -> &std::sync::Arc<ViewData> {
+        &self.nav_history[self.nav_history_pos]
+    }
+
     pub fn view_data_mut(&mut self) -> &mut ViewData {
-        &mut self.nav_history[self.nav_history_pos]
+        std::sync::Arc::make_mut(&mut self.nav_history[self.nav_history_pos])
+    }
+
+    /// Mutable access to one history entry, for results that land on a slot
+    /// other than the active one. Clones only when that entry is shared (e.g.
+    /// by the now-playing snapshot), never on the ordinary path.
+    pub fn history_entry_mut(&mut self, idx: usize) -> &mut ViewData {
+        std::sync::Arc::make_mut(&mut self.nav_history[idx])
     }
 
     pub const fn can_navigate_back(&self) -> bool {
@@ -103,23 +129,15 @@ impl Pane {
         self.nav_history_pos + 1 < self.nav_history.len()
     }
 
-    pub fn from_data(data: PaneData) -> Self {
-        let (nav_history, nav_history_pos) = if data.nav_history.is_empty() {
-            (vec![ViewData::default()], 0)
+    /// Repair a persisted history that has no entries or a position past the
+    /// end (hand-edited or truncated session files).
+    pub fn normalize_nav_history(&mut self) {
+        if self.nav_history.is_empty() {
+            self.nav_history
+                .push(std::sync::Arc::new(ViewData::default()));
+            self.nav_history_pos = 0;
         } else {
-            let len = data.nav_history.len();
-            (data.nav_history, data.nav_history_pos.min(len - 1))
-        };
-        Self {
-            id: data.id,
-            nav_history,
-            nav_history_pos,
-            search_query: data.search_query,
-            search_scope: data.search_scope,
-            search_provider: data.search_provider,
-            show_search_history: false,
-            last_filtered_history: Vec::new(),
-            lyrics: None,
+            self.nav_history_pos = self.nav_history_pos.min(self.nav_history.len() - 1);
         }
     }
 }
@@ -339,35 +357,6 @@ pub enum PaneDir {
 impl PaneDir {
     const fn is_horizontal(self) -> bool {
         matches!(self, PaneDir::Left | PaneDir::Right)
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PaneData {
-    pub id: PaneId,
-    pub nav_history: Vec<ViewData>,
-    pub nav_history_pos: usize,
-    pub search_query: String,
-    pub search_scope: SearchScope,
-    pub search_provider: ProviderId,
-}
-
-impl From<&Pane> for PaneData {
-    fn from(pane: &Pane) -> Self {
-        Self {
-            id: pane.id,
-            nav_history: pane.nav_history.clone(),
-            nav_history_pos: pane.nav_history_pos,
-            search_query: pane.search_query.clone(),
-            search_scope: pane.search_scope,
-            search_provider: pane.search_provider,
-        }
-    }
-}
-
-impl PaneData {
-    pub fn into_pane(self) -> Pane {
-        Pane::from_data(self)
     }
 }
 

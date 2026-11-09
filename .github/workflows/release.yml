@@ -93,13 +93,12 @@ jobs:
 
       - name: Run tests
         env:
-          GOOSE_RELEASE_TAG: v1.5.1-tiny-skia.1
+          GOOSE_RELEASE_TAG: v1.5.5-tiny-skia.1
         run: cargo test --locked app::update::updates::tests -- --test-threads=1
 
       - name: Build
         env:
-          CARGO_PROFILE_RELEASE_STRIP: "true"
-          GOOSE_RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v1.5.1-tiny-skia.1' }}
+          GOOSE_RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v1.5.5-tiny-skia.1' }}
         run: cargo build --release --locked --target x86_64-unknown-linux-gnu
 
       - name: Package
@@ -153,8 +152,7 @@ jobs:
 
       - name: Build
         env:
-          CARGO_PROFILE_RELEASE_STRIP: "true"
-          GOOSE_RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v1.5.1-tiny-skia.1' }}
+          GOOSE_RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v1.5.5-tiny-skia.1' }}
         run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Build .app bundle
@@ -220,7 +218,7 @@ jobs:
       - name: Build
         env:
           CARGO_PROFILE_RELEASE_STRIP: "false"
-          GOOSE_RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v1.5.1-tiny-skia.1' }}
+          GOOSE_RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v1.5.5-tiny-skia.1' }}
         run: cargo build --release --locked --target x86_64-pc-windows-msvc
 
       - name: Package
@@ -335,12 +333,9 @@ jobs:
 
           `goosemusic` is a self-contained binary. On first launch it checks
           for its external tools and can **download `yt-dlp` for you** — a
-          standalone binary needing no Python — just accept the prompt. Only
-          optional extras remain:
+          standalone binary. Just accept the prompt.
 
           - **`yt-dlp`** — YouTube audio streaming & downloads (auto-downloaded if missing)
-          - **Python 3** + `ytmusicapi` — nicer YouTube Music search; without it the app
-            falls back to `yt-dlp` (these are *not* auto-installed)
           - **D-Bus** session bus (Linux) — MPRIS media-key integration (OS-provided)
 
           Nothing needs installing manually to play, stream, or download.

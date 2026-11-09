@@ -51,16 +51,22 @@ impl crate::app::MusicPlayer {
     /// not count.
     fn list_shape(&self) -> Vec<(PaneId, usize)> {
         let mut shape: Vec<(PaneId, usize)> = self
+            .session
             .panes
             .iter()
             .filter(|(_, pane)| pane.lyrics.is_none())
             .map(|(&pane, _)| (pane, self.track_count_in(pane)))
             .filter(|(_, count)| *count > 0)
             .collect();
-        if self.show_queue {
-            let (pane, count) = match self.queue.queue_tab {
-                QueueTab::Queue => (QUEUE_PANE_ID, self.queue.tracks.len().saturating_sub(1)),
-                QueueTab::RecentlyPlayed => (RECENT_PANE_ID, self.queue.recently_played.len()),
+        if self.session.show_queue {
+            let (pane, count) = match self.session.queue.queue_tab {
+                QueueTab::Queue => (
+                    QUEUE_PANE_ID,
+                    self.session.queue.tracks.len().saturating_sub(1),
+                ),
+                QueueTab::RecentlyPlayed => {
+                    (RECENT_PANE_ID, self.session.queue.recently_played.len())
+                }
             };
             if count > 0 {
                 shape.push((pane, count));
@@ -92,7 +98,7 @@ impl crate::app::MusicPlayer {
     #[allow(clippy::too_many_lines)]
     fn handle_message(&mut self, message: Message) -> Task<Message> {
         if let Some(pane) = message.pane() {
-            if !self.panes.contains_key(&pane) {
+            if !self.session.panes.contains_key(&pane) {
                 return Task::none();
             }
         }
@@ -133,7 +139,7 @@ impl crate::app::MusicPlayer {
             Message::SearchInputClicked(pane) => self.handle_search_input_clicked(pane),
             Message::ListBoundsCaptured(bounds) => {
                 for (pane, geo) in &bounds.tracks {
-                    if let Some(p) = self.panes.get_mut(pane) {
+                    if let Some(p) = self.session.panes.get_mut(pane) {
                         p.view_data_mut().scroll = geo.translation_y;
                     }
                 }
@@ -300,7 +306,7 @@ impl crate::app::MusicPlayer {
             }
             Message::ToggleLibrarySave(item) => self.toggle_library_save_with_toast(item),
             Message::ToggleLibraryExpanded => {
-                self.library_expanded = !self.library_expanded;
+                self.session.library_expanded = !self.session.library_expanded;
                 self.save_session();
                 Task::none()
             }
@@ -415,7 +421,7 @@ impl crate::app::MusicPlayer {
             Message::OpenPlaylistAdd(indices) => {
                 let pane = match &self.dialog {
                     Some(Dialog::ContextMenu(m)) => m.pos.pane,
-                    _ => self.focused_pane_id,
+                    _ => self.session.focused,
                 };
                 self.open_playlist_add(PendingAdd { indices, pane })
             }
@@ -441,12 +447,12 @@ impl crate::app::MusicPlayer {
             }
             Message::RefreshServerPlaylists(provider) => self.refresh_server_playlists(provider),
             Message::OpenServerPlaylist(target, name) => {
-                let pane = self.focused_pane_id;
+                let pane = self.session.focused;
                 self.dialog = None;
                 self.open_server_playlist(pane, target, &name, false)
             }
             Message::OpenAndPlayServerPlaylist(target, name) => {
-                let pane = self.focused_pane_id;
+                let pane = self.session.focused;
                 self.dialog = None;
                 self.open_server_playlist(pane, target, &name, true)
             }
@@ -534,16 +540,16 @@ impl crate::app::MusicPlayer {
                 Task::none()
             }
             Message::ToggleQueue => {
-                self.show_queue = !self.show_queue;
+                self.session.show_queue = !self.session.show_queue;
                 self.save_session();
-                if self.show_queue {
+                if self.session.show_queue {
                     self.capture_bounds_task()
                 } else {
                     Task::none()
                 }
             }
             Message::ToggleRepeat => {
-                self.repeat = !self.repeat;
+                self.session.repeat = !self.session.repeat;
                 self.save_session();
                 Task::none()
             }
@@ -746,7 +752,7 @@ impl crate::app::MusicPlayer {
                     return Task::none();
                 };
                 let (pane, target) = (menu.pane, menu.target);
-                self.open_card(pane, &target)
+                self.open_card(pane, &target.view())
             }
             Message::CardMenuOpenInBrowser => {
                 self.handle_card_menu_open_in_browser();
@@ -1067,19 +1073,19 @@ mod tests {
     #[test]
     fn the_queue_counts_up_next_and_a_lyrics_overlay_hides_its_pane() {
         let mut p = player();
-        p.show_queue = true;
+        p.session.show_queue = true;
         assert!(p.list_shape().is_empty());
 
         // A lone track is the panel's now-playing row, rendered outside the
         // scrollable, so it does not need list geometry.
-        p.queue.tracks = vec![track("1")];
+        p.session.queue.tracks = vec![track("1")];
         assert!(p.list_shape().is_empty());
 
-        p.queue.tracks.push(track("2"));
+        p.session.queue.tracks.push(track("2"));
         assert_eq!(p.list_shape(), vec![(QUEUE_PANE_ID, 1)]);
 
         p.view_data_mut().set_tracks(vec![track("1")]);
-        let pane = p.focused_pane_id;
+        let pane = p.session.focused;
         p.pane_mut(pane).lyrics = Some(crate::app::LyricsState::new(
             crate::lyrics::LyricsProvider::LrcLib,
         ));

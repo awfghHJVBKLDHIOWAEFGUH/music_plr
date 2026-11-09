@@ -71,7 +71,7 @@ pub enum BackendResult {
         rid: u64,
         provider: ProviderId,
         kind: crate::providers::ArtistDataKind,
-        data: Box<Result<crate::providers::ArtistKindData, crate::providers::ProviderError>>,
+        data: Box<Result<crate::providers::SectionContent, crate::providers::ProviderError>>,
     },
     LocalFilesPicked(Vec<std::path::PathBuf>),
     /// Playlist import: the user picked a source (single file for Native/CSV,
@@ -384,10 +384,9 @@ pub enum Message {
         /// The scrollable the card sits in, whose offset shifted `point`.
         host: ScrollTarget,
         pane: PaneId,
-        /// The exact view the card's click opens, so the menu's "Open" lands
-        /// on the same page (and every other entry reads the card's identity
-        /// off it).
-        target: ViewKind,
+        /// The card's identity, from which the menu's "Open" rebuilds the
+        /// exact view the click opens.
+        target: crate::app::view_data::CardMenuTarget,
         /// The card shelf the card sits in, when it has one (artist-page
         /// section or Home rail — that one scrolls sideways).
         rail: Option<crate::app::update::operation::RailKey>,
@@ -517,6 +516,19 @@ mod tests {
         providers::{ArtistSectionKind, SearchScope},
     };
 
+    fn card_target() -> crate::app::view_data::CardMenuTarget {
+        crate::app::view_data::CardMenuTarget::new(std::sync::Arc::new(
+            crate::data::library::LibraryItem {
+                kind: crate::data::library::LibraryKind::Playlist,
+                id: String::new(),
+                title: String::new(),
+                thumbnail: String::new(),
+                provider: ProviderId::YouTube,
+                url: String::new(),
+            },
+        ))
+    }
+
     /// Every pane-scoped message must report its pane so the dispatcher can
     /// drop actions for closed panes. Extend this list when adding a
     /// `PaneId`-carrying variant.
@@ -600,7 +612,7 @@ mod tests {
             Message::CardRightClicked {
                 host: ScrollTarget::Cards(pane),
                 pane,
-                target: ViewKind::Downloads,
+                target: card_target(),
                 rail: None,
                 point: Point::ORIGIN,
             },

@@ -41,7 +41,7 @@ impl MusicPlayer {
         };
         self.dialog = Some(Dialog::Edit(EditTrackState {
             title: track.title.clone(),
-            artist: track.artist.clone(),
+            artist: track.artist_text(),
             source: track.source,
             original: track,
             pos,
@@ -242,7 +242,7 @@ impl MusicPlayer {
         let Some(track) = manual.selected_track() else {
             return;
         };
-        let (provider, title, artist) = (manual.provider, &track.title, &track.artist);
+        let (provider, title, artists) = (manual.provider, &track.title, &track.artists);
         let Some(pt) = track.providers.get(&provider).cloned() else {
             return;
         };
@@ -250,7 +250,7 @@ impl MusicPlayer {
             edit.title = title.clone();
         }
         if edit.artist.trim().is_empty() {
-            edit.artist = artist.clone();
+            edit.artist = artists.join(", ");
         }
         edit.original.set_provider(provider, pt);
         edit.source = provider;
@@ -278,9 +278,35 @@ impl MusicPlayer {
             return;
         };
         let mut track = edit.original;
+        let previous_source = track.source;
+        let previous_ids = track.provider_artist_ids(previous_source).to_vec();
+        let artists = crate::util::split_artist_names(&edit.artist);
+        let artists_changed = artists != track.artists;
+        let artist_ids: Vec<String> = if !artists_changed {
+            previous_ids
+        } else if edit.source == previous_source {
+            artists
+                .iter()
+                .map(|name| {
+                    track
+                        .artists
+                        .iter()
+                        .position(|old| old == name)
+                        .and_then(|index| previous_ids.get(index).cloned())
+                        .unwrap_or_default()
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         track.title = edit.title;
-        track.artist = edit.artist;
+        track.artists = artists;
         track.source = edit.source;
+        if artists_changed {
+            if let Some(pt) = track.providers.get_mut(&track.source) {
+                pt.artist_ids = artist_ids;
+            }
+        }
         self.set_track_at(edit.pos, track);
         self.playlists.save();
         self.save_session();
@@ -320,7 +346,7 @@ mod tests {
     fn editing_player() -> MusicPlayer {
         let mut p = MusicPlayer::new_with(config::Config::default());
         p.reset_test_pane(vec![ViewData::default()]);
-        p.queue.tracks = vec![result_track(
+        p.session.queue.tracks = vec![result_track(
             ProviderId::YouTube,
             "old",
             "Old Title",
@@ -474,7 +500,7 @@ mod tests {
     #[test]
     fn confirming_fills_fields_that_are_still_blank() {
         let mut p = MusicPlayer::new_with(config::Config::default());
-        p.queue.tracks = vec![Track::default()];
+        p.session.queue.tracks = vec![Track::default()];
         p.open_edit_track(TrackPos::new(0, QUEUE_PANE_ID));
         p.edit_dialog_mut().unwrap().title = String::new();
         p.edit_dialog_mut().unwrap().artist = "Kept".into();
@@ -547,8 +573,11 @@ mod tests {
             MANUAL_SEARCH_PANE_ID,
         )));
 
-        assert_eq!(p.queue.tracks.len(), 2);
-        assert_eq!(p.queue.current().map(|t| t.title.as_str()), Some("Second"));
+        assert_eq!(p.session.queue.tracks.len(), 2);
+        assert_eq!(
+            p.session.queue.current().map(|t| t.title.as_str()),
+            Some("Second")
+        );
         // The step is untouched: the result can still be picked afterwards.
         assert!(p.edit_manual_open());
         assert!(p.selection_in(MANUAL_SEARCH_PANE_ID).is_empty());
@@ -681,5 +710,33 @@ mod tests {
         assert!(edit.manual.is_none());
         assert_eq!(edit.source, ProviderId::Local);
         assert_eq!(edit.original.provider_id(ProviderId::Local), Some("b"));
+    }
+
+    #[test]
+    fn saving_a_multi_artist_line_keeps_the_ids_of_artists_that_stay() {
+        let mut p = MusicPlayer::new_with(config::Config::default());
+        p.reset_test_pane(vec![ViewData::default()]);
+        p.session.queue.tracks = vec![Track::from_provider_artists(
+            ProviderId::YouTube,
+            "a".into(),
+            "https://example.com/a".into(),
+            "Title",
+            vec!["A".into(), "B".into()],
+            0,
+            String::new(),
+            None,
+            vec!["yt-a".into(), "yt-b".into()],
+        )];
+        p.open_edit_track(TrackPos::new(0, QUEUE_PANE_ID));
+        p.edit_dialog_mut().unwrap().artist = "B, A, C".into();
+
+        p.apply_edit_track();
+
+        let track = &p.session.queue.tracks[0];
+        assert_eq!(track.artists, ["B", "A", "C"]);
+        assert_eq!(
+            track.provider_artist_ids(ProviderId::YouTube),
+            ["yt-b", "yt-a", ""]
+        );
     }
 }

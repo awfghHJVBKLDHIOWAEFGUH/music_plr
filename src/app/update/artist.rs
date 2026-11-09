@@ -3,8 +3,8 @@ use crate::{
     app::{pane::PaneId, view_data::ArtistEntry, ViewKind},
     load_state::LoadState,
     providers::{
-        spawn_artist_kinds_fetch, ArtistDataKind, ArtistKindData, ArtistKindResult,
-        ArtistPageState, ArtistSectionKind, ProviderId, SectionContent,
+        spawn_artist_kinds_fetch, ArtistDataKind, ArtistKindResult, ArtistPageState,
+        ArtistSectionKind, ProviderId, SectionContent,
     },
 };
 
@@ -209,7 +209,7 @@ impl MusicPlayer {
         let Some((pane, idx)) = self.slot_for_request(rid) else {
             return;
         };
-        if let ViewKind::Artist(entry) = &mut self.pane_mut(pane).nav_history[idx].kind {
+        if let ViewKind::Artist(entry) = &mut self.pane_mut(pane).history_entry_mut(idx).kind {
             entry
                 .page
                 .provider_ids
@@ -230,7 +230,7 @@ impl MusicPlayer {
         rid: u64,
         provider: ProviderId,
         kind: ArtistDataKind,
-        result: Result<ArtistKindData, crate::providers::ProviderError>,
+        result: Result<SectionContent, crate::providers::ProviderError>,
     ) {
         let Some((pane, idx)) = self.slot_for_request(rid) else {
             return;
@@ -242,7 +242,7 @@ impl MusicPlayer {
                 return;
             }
         };
-        let ViewKind::Artist(entry) = &mut self.pane_mut(pane).nav_history[idx].kind else {
+        let ViewKind::Artist(entry) = &mut self.pane_mut(pane).history_entry_mut(idx).kind else {
             return;
         };
         let artist_page = &mut entry.page;
@@ -251,20 +251,25 @@ impl MusicPlayer {
             .entry(provider)
             .or_default()
             .merge_kind(kind, &data);
-        if let ArtistKindData::Header(header) = &data {
-            artist_page.merge_header(provider, Some(header));
+        if let SectionContent::Header(header) = &data {
+            artist_page.merge_header(provider, Some(header.as_ref()));
         } else {
             let section_kind = ArtistSectionKind::ALL
                 .into_iter()
                 .find(|k| k.data_kind() == kind);
             if let Some(section_kind) = section_kind {
                 if artist_page.section(section_kind).provider == Some(provider) {
-                    artist_page.section_mut(section_kind).state =
-                        LoadState::Ready(data.to_section_content());
-                    if section_kind == ArtistSectionKind::Popular {
-                        if let ArtistKindData::Popular(tracks) = data {
-                            let slot = &mut self.pane_mut(pane).nav_history[idx];
+                    match data {
+                        SectionContent::Tracks(tracks)
+                            if section_kind == ArtistSectionKind::Popular =>
+                        {
+                            artist_page.section_mut(section_kind).state =
+                                LoadState::Ready(SectionContent::Tracks(tracks.clone()));
+                            let slot = self.pane_mut(pane).history_entry_mut(idx);
                             Self::install_popular_tracks(slot, tracks, provider);
+                        }
+                        data => {
+                            artist_page.section_mut(section_kind).state = LoadState::Ready(data);
                         }
                     }
                 }
@@ -290,7 +295,7 @@ impl MusicPlayer {
     ) {
         let reason = self.strings.error_reason(error).to_string();
         tracing::warn!("artist {kind:?} load failed: {}", error.detail);
-        let ViewKind::Artist(entry) = &mut self.pane_mut(pane).nav_history[idx].kind else {
+        let ViewKind::Artist(entry) = &mut self.pane_mut(pane).history_entry_mut(idx).kind else {
             return;
         };
         let artist_page = &mut entry.page;
@@ -298,7 +303,7 @@ impl MusicPlayer {
         let popular_failed = kind == ArtistDataKind::Popular
             && artist_page.section(ArtistSectionKind::Popular).provider == Some(provider);
         if popular_failed && self.pane(pane).nav_history[idx].content.is_loading() {
-            self.pane_mut(pane).nav_history[idx].content = LoadState::Failed(reason.clone());
+            self.pane_mut(pane).history_entry_mut(idx).content = LoadState::Failed(reason.clone());
         }
         let dedup = Some((rid, provider));
         if self.artist_error_dedup != dedup {
@@ -394,11 +399,11 @@ impl MusicPlayer {
 
     pub(crate) fn seed_active_artist_thumbnails(&mut self, pane: PaneId) {
         let Self {
-            panes,
+            session,
             thumbnail_index,
             ..
         } = self;
-        let Some(view) = panes.get(&pane).map(crate::app::Pane::view_data) else {
+        let Some(view) = session.panes.get(&pane).map(crate::app::Pane::view_data) else {
             return;
         };
         Self::seed_artist_thumbnails(thumbnail_index, view);
@@ -406,11 +411,15 @@ impl MusicPlayer {
 
     pub(crate) fn seed_slot_artist_thumbnails(&mut self, pane: PaneId, idx: usize) {
         let Self {
-            panes,
+            session,
             thumbnail_index,
             ..
         } = self;
-        let Some(view) = panes.get(&pane).and_then(|p| p.nav_history.get(idx)) else {
+        let Some(view) = session
+            .panes
+            .get(&pane)
+            .and_then(|p| p.nav_history.get(idx))
+        else {
             return;
         };
         Self::seed_artist_thumbnails(thumbnail_index, view);

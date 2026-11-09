@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use super::{warn, MusicPlayer};
 use crate::{
-    app::pane::PaneId,
+    app::{pane::PaneId, Pane, SplitNode},
     data::{session::SessionState, JsonStore},
 };
 
@@ -25,72 +25,40 @@ impl MusicPlayer {
             return;
         }
         self.last_session_flush = now;
-        let mut panes: Vec<crate::app::PaneData> = self
-            .panes
-            .values()
-            .map(crate::app::PaneData::from)
-            .collect();
-        panes.sort_by_key(|p| p.id);
-        let state = SessionState {
-            panes,
-            root: self.split_root.clone(),
-            focused: self.focused_pane_id,
-            queue: self.queue.clone(),
-            show_queue: self.show_queue,
-            volume: self.volume,
-            repeat: self.repeat,
-            library_expanded: self.library_expanded,
-            lyrics_provider: self.lyrics_provider,
-            now_playing_from: self.now_playing_from.clone(),
-        };
-        state.save();
+        self.session.save();
         self.session_dirty = false;
     }
 
     pub fn restore_session(&mut self) {
-        let state = SessionState::load_migrated();
-        self.queue = state.queue;
-        self.show_queue = state.show_queue;
-        self.volume = state.volume;
-        self.repeat = state.repeat;
-        self.audio.set_volume(state.volume);
-        self.library_expanded = state.library_expanded;
-
-        self.panes = state
-            .panes
-            .into_iter()
-            .map(|data| (data.id, data.into_pane()))
-            .collect();
-        if self.panes.is_empty() {
-            self.panes.insert(0, crate::app::Pane::new(0));
+        self.session = SessionState::load_migrated();
+        if self.session.panes.is_empty() {
+            self.session.panes.insert(0, Pane::new(0));
         }
         // Drop panes the tree doesn't reference and fall back to a single
         // leaf when the saved tree is inconsistent.
         let mut leaves = Vec::new();
-        state.root.leaves(&mut leaves);
+        self.session.root.leaves(&mut leaves);
         let valid: Vec<PaneId> = leaves
             .into_iter()
-            .filter(|id| self.panes.contains_key(id))
+            .filter(|id| self.session.panes.contains_key(id))
             .collect();
         if valid.is_empty() {
-            let id = *self.panes.keys().min().unwrap_or(&0);
-            self.split_root = crate::app::SplitNode::Leaf(id);
-            self.focused_pane_id = id;
+            let id = *self.session.panes.keys().min().unwrap_or(&0);
+            self.session.root = SplitNode::Leaf(id);
+            self.session.focused = id;
         } else {
-            self.panes.retain(|id, _| valid.contains(id));
-            self.split_root = state.root;
-            self.focused_pane_id = if valid.contains(&state.focused) {
-                state.focused
+            self.session.panes.retain(|id, _| valid.contains(id));
+            self.session.focused = if valid.contains(&self.session.focused) {
+                self.session.focused
             } else {
                 valid[0]
             };
         }
-        self.next_pane_id = self.panes.keys().max().map_or(0, |m| m + 1).max(1);
+        self.next_pane_id = self.session.panes.keys().max().map_or(0, |m| m + 1).max(1);
+        self.audio.set_volume(self.session.volume);
         for pane in self.pane_ids() {
             self.sync_downloads_view(pane);
         }
-        self.lyrics_provider = state.lyrics_provider;
-        self.now_playing_from = state.now_playing_from;
     }
 
     pub fn notify(&mut self, msg: impl Into<std::borrow::Cow<'static, str>>) {

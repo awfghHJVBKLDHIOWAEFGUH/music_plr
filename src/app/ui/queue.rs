@@ -40,7 +40,7 @@ pub(super) fn view_queue_panel(player: &MusicPlayer) -> Element<'_, Message, App
         _ => Space::new().into(),
     };
 
-    let view = match player.queue.queue_tab {
+    let view = match player.session.queue.queue_tab {
         QueueTab::Queue => view_queue_tab(player),
         QueueTab::RecentlyPlayed => view_recently_played_tab(player),
     };
@@ -76,7 +76,7 @@ fn queue_tab<'a>(
     queue_tab: QueueTab,
 ) -> Element<'a, Message, AppTheme> {
     let dir = player.strings.direction;
-    let active = player.queue.queue_tab == queue_tab;
+    let active = player.session.queue.queue_tab == queue_tab;
 
     Button::new(
         player.strings.direction.leading(
@@ -131,6 +131,7 @@ fn view_queue_tab(player: &MusicPlayer) -> Element<'_, Message, AppTheme> {
     };
     let dir = player.strings.direction;
     let now_playing_header: Element<'_, Message, AppTheme> = match player
+        .session
         .now_playing_from
         .as_ref()
         .and_then(|v| now_playing_source_label(&v.kind, player.strings))
@@ -154,7 +155,7 @@ fn view_queue_tab(player: &MusicPlayer) -> Element<'_, Message, AppTheme> {
     };
 
     let now_playing_row: Element<'_, Message, AppTheme> =
-        if let Some(track) = player.queue.current() {
+        if let Some(track) = player.session.queue.current() {
             Container::new(track_row_layout(
                 Space::new().into(),
                 track,
@@ -182,8 +183,8 @@ fn view_queue_tab(player: &MusicPlayer) -> Element<'_, Message, AppTheme> {
         .align_x(player.strings.direction.align());
 
     let offset = 1;
-    let upcoming = if offset <= player.queue.tracks.len() {
-        &player.queue.tracks[offset..]
+    let upcoming = if offset <= player.session.queue.tracks.len() {
+        &player.session.queue.tracks[offset..]
     } else {
         &[]
     };
@@ -223,7 +224,7 @@ fn view_queue_tab(player: &MusicPlayer) -> Element<'_, Message, AppTheme> {
 }
 
 fn view_recently_played_tab(player: &MusicPlayer) -> Element<'_, Message, AppTheme> {
-    let tracks = &player.queue.recently_played;
+    let tracks = &player.session.queue.recently_played;
 
     if tracks.is_empty() {
         return empty_state(player.strings.no_recently_played_tracks);

@@ -104,28 +104,35 @@ pub trait JsonStore: Serialize + DeserializeOwned + Default {
 
     #[cfg(not(test))]
     fn save(&self) {
-        let path = Self::path();
-        if let Some(dir) = path.parent() {
-            if let Err(e) = std::fs::create_dir_all(dir) {
-                tracing::warn!("Failed to create {}: {e}", dir.display());
-                return;
-            }
-        }
-        let Ok(s) = serde_json::to_string_pretty(self) else {
-            tracing::warn!("Failed to serialize {}", path.display());
-            return;
-        };
-        let tmp = path.with_extension("tmp");
-        if let Err(e) = std::fs::write(&tmp, s) {
-            tracing::warn!("Failed to write {}: {e}", tmp.display());
-            return;
-        }
-        if let Err(e) = std::fs::rename(&tmp, &path) {
-            tracing::warn!("Failed to rename {}: {e}", tmp.display());
-            let _ = std::fs::remove_file(&tmp);
-        }
+        write_json(&Self::path(), self);
     }
 
     #[cfg(test)]
     fn save(&self) {}
+}
+
+/// Write `value` to `path` as pretty JSON, creating the parent directory.
+/// Only compiled for real saves: `JsonStore::save` is a no-op under `cfg(test)`
+/// so tests never touch the real user directories.
+#[cfg(not(test))]
+fn write_json<T: Serialize>(path: &std::path::Path, value: &T) {
+    if let Some(dir) = path.parent() {
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            tracing::warn!("Failed to create {}: {e}", dir.display());
+            return;
+        }
+    }
+    let Ok(s) = serde_json::to_string_pretty(value) else {
+        tracing::warn!("Failed to serialize {}", path.display());
+        return;
+    };
+    let tmp = path.with_extension("tmp");
+    if let Err(e) = std::fs::write(&tmp, s) {
+        tracing::warn!("Failed to write {}: {e}", tmp.display());
+        return;
+    }
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        tracing::warn!("Failed to rename {}: {e}", tmp.display());
+        let _ = std::fs::remove_file(&tmp);
+    }
 }

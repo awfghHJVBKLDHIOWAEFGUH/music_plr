@@ -8,7 +8,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use super::{custom_dispatch, CardData, ProviderId};
-use crate::{data::library::LibraryKind, i18n::Strings, types::Track};
+use crate::{i18n::Strings, types::Track};
 
 /// One kind of home row. The (provider, kind) pair identifies a row across
 /// refreshes and in the on-disk cache.
@@ -34,7 +34,7 @@ pub enum HomeSectionKind {
 }
 
 impl HomeSectionKind {
-    /// Stable key for the on-disk cache and the python bridge.
+    /// Stable key for the on-disk cache and the provider fetch.
     pub fn key(self) -> &'static str {
         match self {
             HomeSectionKind::QuickPicks => "quick_picks",
@@ -93,6 +93,15 @@ pub struct HomeSectionKey {
     pub kind: HomeSectionKind,
 }
 
+impl Default for HomeSectionKey {
+    fn default() -> Self {
+        Self {
+            provider: ProviderId::YouTube,
+            kind: HomeSectionKind::QuickPicks,
+        }
+    }
+}
+
 impl HomeSectionKey {
     pub fn new(provider: ProviderId, kind: HomeSectionKind) -> Self {
         Self { provider, kind }
@@ -103,44 +112,15 @@ impl HomeSectionKey {
     pub fn cache_key(self) -> String {
         format!("{}:{}", self.provider.slug(), self.kind.key())
     }
-}
 
-/// A navigable card on the home feed (artist, album or playlist).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HomeCard {
-    pub kind: LibraryKind,
-    pub provider: ProviderId,
-    pub id: String,
-    pub title: String,
-    pub subtitle: String,
-    pub thumbnail: String,
-    pub url: String,
-}
-
-impl HomeCard {
-    pub fn new(kind: LibraryKind, provider: ProviderId, card: CardData) -> Self {
-        Self {
-            kind,
-            provider,
-            id: card.id,
-            title: card.title,
-            subtitle: card.subtitle,
-            thumbnail: card.thumbnail,
-            url: card.url,
-        }
-    }
-}
-
-impl From<&HomeCard> for crate::data::library::LibraryItem {
-    fn from(card: &HomeCard) -> Self {
-        Self {
-            kind: card.kind,
-            id: card.id.clone(),
-            title: card.title.clone(),
-            thumbnail: card.thumbnail.clone(),
-            provider: card.provider,
-            url: card.url.clone(),
-        }
+    /// Inverse of [`cache_key`](Self::cache_key), for rebuilding the key the
+    /// cache leaves out of the serialized row.
+    pub fn from_cache_key(key: &str) -> Option<Self> {
+        let (slug, kind) = key.split_once(':')?;
+        Some(Self {
+            provider: ProviderId::from_slug(slug)?,
+            kind: HomeSectionKind::from_key(kind)?,
+        })
     }
 }
 
@@ -148,7 +128,7 @@ impl From<&HomeCard> for crate::data::library::LibraryItem {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum HomeSectionData {
     Tracks(Vec<Track>),
-    Cards(Vec<HomeCard>),
+    Cards(Vec<CardData>),
 }
 
 impl HomeSectionData {
@@ -175,7 +155,7 @@ impl HomeSectionData {
             }
             HomeSectionData::Cards(cards) => {
                 for card in cards {
-                    index.ensure(card.provider, &card.id, &card.thumbnail);
+                    index.ensure(card.card.provider, &card.card.id, &card.card.thumbnail);
                 }
             }
         }
@@ -183,16 +163,35 @@ impl HomeSectionData {
 }
 
 /// A fetched row, before it is merged into a pane's home state.
-#[derive(Debug, Clone, PartialEq)]
+///
+/// `data` is shared by `Arc`: the same row lives in `home_cache.json`'s
+/// in-memory store, the pane's `HomeData` and the cache write, so installing
+/// or replacing a row never copies its cards or tracks.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HomeSection {
+    /// Runtime identity; the cache stores it as the row's map key and rebuilds
+    /// it in [`HomeCache::after_load`](crate::data::home_cache::HomeCache).
+    #[serde(skip)]
     pub key: HomeSectionKey,
     pub title: String,
-    pub data: HomeSectionData,
+    pub data: std::sync::Arc<HomeSectionData>,
+    /// When the row was fetched, for the cache's freshness check. Runtime rows
+    /// that did not come from disk carry 0.
+    pub fetched_at: u64,
 }
 
 impl HomeSection {
-    pub fn new(key: HomeSectionKey, title: String, data: HomeSectionData) -> Self {
-        Self { key, title, data }
+    pub fn new(
+        key: HomeSectionKey,
+        title: String,
+        data: impl Into<std::sync::Arc<HomeSectionData>>,
+    ) -> Self {
+        Self {
+            key,
+            title,
+            data: data.into(),
+            fetched_at: 0,
+        }
     }
 
     /// The title to draw: the provider's own shelf title when it supplied one
@@ -245,8 +244,10 @@ fn home_capable(provider: ProviderId) -> bool {
         return false;
     }
     match provider {
-        ProviderId::YouTube => crate::deps::availability().ytmusicapi,
-        ProviderId::SoundCloud | ProviderId::Bandcamp | ProviderId::LastFm => true,
+        ProviderId::YouTube
+        | ProviderId::SoundCloud
+        | ProviderId::Bandcamp
+        | ProviderId::LastFm => true,
         ProviderId::MusicBrainz | ProviderId::Local => false,
         ProviderId::Custom(_, _) => provider.capabilities().search,
     }
@@ -316,18 +317,10 @@ pub fn provider_sections(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::custom_providers::CustomProviderKind;
+    use crate::data::{custom_providers::CustomProviderKind, library::LibraryKind};
 
-    fn card(id: &str) -> HomeCard {
-        HomeCard {
-            kind: LibraryKind::Album,
-            provider: ProviderId::Bandcamp,
-            id: id.to_string(),
-            title: id.to_string(),
-            subtitle: String::new(),
-            thumbnail: String::new(),
-            url: String::new(),
-        }
+    fn card(id: &str) -> CardData {
+        CardData::new(LibraryKind::Album, ProviderId::Bandcamp, id, id, "", "", "")
     }
 
     fn section(provider: ProviderId, kind: HomeSectionKind, title: &str) -> HomeSection {

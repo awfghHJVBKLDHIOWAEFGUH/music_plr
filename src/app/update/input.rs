@@ -99,7 +99,7 @@ fn apply_card_menu_shortcut(
             Some(ContextMenuFocus::Item(i)) => menu
                 .actions()
                 .get(i)
-                .map_or_else(Task::none, |a| Task::done(a.to_message())),
+                .map_or_else(Task::none, |a| Task::done((*a).into())),
             _ => Task::none(),
         },
         _ => Task::none(),
@@ -184,7 +184,7 @@ impl MusicPlayer {
             self.drag.drag_active = true;
             // Reveal the library so it can receive drops.
             if self.drag.is_pressed_card() {
-                self.library_expanded = true;
+                self.session.library_expanded = true;
             }
             return Task::batch([self.capture_bounds_task(), self.handle_drag_update()]);
         }
@@ -221,22 +221,22 @@ impl MusicPlayer {
             S::OpenPalette => self.open_palette(),
             S::OpenPlaylistPicker => self.open_playlist_picker(),
             S::FocusSearch => {
-                let pane = self.focused_pane_id;
+                let pane = self.session.focused;
                 Task::batch([
                     operation::focus::<Message>(crate::app::ui::search_input_id(pane)),
                     self.activate_search_input(pane),
                 ])
             }
             S::SplitVertical => {
-                let pane = self.focused_pane_id;
+                let pane = self.session.focused;
                 self.split_pane(pane, crate::app::SplitDir::Vertical)
             }
             S::SplitHorizontal => {
-                let pane = self.focused_pane_id;
+                let pane = self.session.focused;
                 self.split_pane(pane, crate::app::SplitDir::Horizontal)
             }
             S::ClosePane => {
-                let pane = self.focused_pane_id;
+                let pane = self.session.focused;
                 self.close_pane(pane)
             }
             S::ToggleSelection => self.toggle_selection_on_focused(),
@@ -246,11 +246,11 @@ impl MusicPlayer {
             }
             S::OpenMenu => self.open_context_menu_for_hovered_track(),
             S::ExecuteSearch => {
-                let pane = self.focused_pane_id;
+                let pane = self.session.focused;
                 self.run_search(pane)
             }
             S::Escape => {
-                let pane = self.focused_pane_id;
+                let pane = self.session.focused;
                 self.selection_anchor = None;
                 if self.track_list_search.is_some() {
                     self.track_list_search = None;
@@ -270,24 +270,24 @@ impl MusicPlayer {
             }
             S::FocusNeighbor(dir) => self.focus_neighbor(dir),
             S::NavBack => {
-                let pane = self.focused_pane_id;
+                let pane = self.session.focused;
                 self.handle_navigate_back(pane)
             }
             S::NavForward => {
-                let pane = self.focused_pane_id;
+                let pane = self.session.focused;
                 self.handle_navigate_forward(pane)
             }
             S::CyclePlaylist(dir) => self.cycle_playlist(dir),
             S::ToggleListFocus => self.toggle_keyboard_list(),
             S::OpenLyrics => {
-                let pane = self.focused_pane_id;
+                let pane = self.session.focused;
                 self.handle_show_lyrics(pane)
             }
             S::HoverMove { dir, extend } => {
                 if self.track_list_search.is_some() {
                     return self.handle_track_list_search_step(dir);
                 }
-                if self.pane(self.focused_pane_id).show_search_history {
+                if self.pane(self.session.focused).show_search_history {
                     return self.step_search_history_hover(dir);
                 }
                 if extend {
@@ -319,17 +319,17 @@ impl MusicPlayer {
                 self.step_hovered_track_by(dir, steps, false)
             }
             S::CycleProvider(dir) => {
-                let pane = self.focused_pane_id;
+                let pane = self.session.focused;
                 self.cycle_search_provider(pane, dir);
                 Task::none()
             }
             S::CycleScope(dir) => {
-                let pane = self.focused_pane_id;
+                let pane = self.session.focused;
                 self.cycle_search_scope(pane, dir);
                 Task::none()
             }
             S::ProviderSlot(index) => {
-                let pane = self.focused_pane_id;
+                let pane = self.session.focused;
                 if let Some(&provider) = crate::providers::ProviderId::searchable().get(index) {
                     self.stage_search_provider(pane, provider);
                 }
@@ -339,7 +339,7 @@ impl MusicPlayer {
             S::FocusNext(dir) => self.focus_next_pane(dir),
             S::ActivateHovered => {
                 if let Some(i) = self.drag.hovered_search_history() {
-                    return self.handle_search_history_select(self.focused_pane_id, i);
+                    return self.handle_search_history_select(self.session.focused, i);
                 } else if let Some(hovered) = self.focused_hovered_track() {
                     self.handle_play_track(hovered);
                 }
@@ -411,17 +411,17 @@ impl MusicPlayer {
     }
 
     pub fn switch_queue_tab(&mut self, tab: QueueTab) -> Task<Message> {
-        self.queue.queue_tab = tab;
+        self.session.queue.queue_tab = tab;
         self.drag.clear_hovered_track();
         self.save_session();
         Task::none()
     }
 
     pub fn cycle_queue_tab(&mut self) -> Task<Message> {
-        if !self.show_queue {
-            self.show_queue = true;
+        if !self.session.show_queue {
+            self.session.show_queue = true;
         }
-        let next = match self.queue.queue_tab {
+        let next = match self.session.queue.queue_tab {
             QueueTab::Queue => QueueTab::RecentlyPlayed,
             QueueTab::RecentlyPlayed => QueueTab::Queue,
         };
@@ -444,7 +444,7 @@ impl MusicPlayer {
         if self.track_list_search.is_some() {
             return self.handle_track_list_search_step(dir);
         }
-        let pane = self.focused_pane_id;
+        let pane = self.session.focused;
         if self.pane(pane).show_search_history {
             let mut task = Task::none();
             for _ in 0..steps.max(1) {
@@ -488,7 +488,7 @@ impl MusicPlayer {
             let pane = fs.pane;
             return self.move_hovered(TrackPos::new(index, pane));
         }
-        let pane = self.focused_pane_id;
+        let pane = self.session.focused;
         if self.pane(pane).show_search_history {
             let count = self.pane(pane).last_filtered_history.len();
             if count == 0 {
@@ -533,13 +533,13 @@ impl MusicPlayer {
     }
 
     fn toggle_keyboard_list(&mut self) -> Task<Message> {
-        if !self.show_queue {
+        if !self.session.show_queue {
             return Task::none();
         }
-        let pane = self.focused_pane_id;
+        let pane = self.session.focused;
 
         let target = if is_main_pane(self.hovered_pane()) {
-            self.queue.queue_tab.into()
+            self.session.queue.queue_tab.into()
         } else {
             pane
         };
@@ -617,7 +617,7 @@ impl MusicPlayer {
     /// in the dropdown viewport — mirroring track-list keyboard nav. Starts
     /// from the first entry when nothing is hovered yet.
     fn step_search_history_hover(&mut self, dir: isize) -> Task<Message> {
-        let pane = self.focused_pane_id;
+        let pane = self.session.focused;
         let count = self.pane(pane).last_filtered_history.len();
         if count == 0 {
             return Task::none();
@@ -630,7 +630,7 @@ impl MusicPlayer {
     }
 
     fn move_search_history_hover_to(&mut self, new_idx: usize) -> Task<Message> {
-        let pane = self.focused_pane_id;
+        let pane = self.session.focused;
         self.drag.claim_keyboard_hover();
         self.drag.set_hovered_search_history(new_idx);
         let y = self
@@ -658,7 +658,7 @@ impl MusicPlayer {
         }
         self.drag
             .hovered_track()
-            .map_or(self.focused_pane_id, |h| h.pane)
+            .map_or(self.session.focused, |h| h.pane)
     }
 
     pub(crate) fn open_track_list_search(&mut self) -> Task<Message> {
@@ -708,15 +708,17 @@ impl MusicPlayer {
             None => return Task::none(),
         };
         let tracks: &[Track] = match pane {
-            QUEUE_PANE_ID => &self.queue.tracks,
-            RECENT_PANE_ID => self.queue.recently_played.as_slices().0,
+            QUEUE_PANE_ID => &self.session.queue.tracks,
+            RECENT_PANE_ID => self.session.queue.recently_played.as_slices().0,
             _ => self.view_tracks_in(pane),
         };
         let needle = crate::util::FuzzyQuery::new(query);
         let matches: Vec<usize> = tracks
             .iter()
             .enumerate()
-            .filter(|(_, t)| needle.matches(&t.title) || needle.matches(&t.artist))
+            .filter(|(_, t)| {
+                needle.matches(&t.title) || t.artists.iter().any(|artist| needle.matches(artist))
+            })
             .map(|(i, _)| i)
             .collect();
         let fs = self.track_list_search.as_mut().expect("checked above");
@@ -811,7 +813,7 @@ mod tests {
     #[test]
     fn vim_step_wraps_and_page_clamps() {
         let mut p = player();
-        let pane = p.focused_pane_id;
+        let pane = p.session.focused;
         let pos = |i| TrackPos::new(i, pane);
         let _ = p.step_hovered_track_by(1, 1, true);
         assert_eq!(p.drag.hovered_track(), Some(pos(1)));
@@ -830,7 +832,7 @@ mod tests {
     #[test]
     fn shift_extend_selects_range_and_plain_move_clears_anchor() {
         let mut p = player();
-        let pane = p.focused_pane_id;
+        let pane = p.session.focused;
         let _ = p.extend_hovered_selection(1);
         assert_eq!(p.selection_in(pane), &[0, 1]);
         let _ = p.extend_hovered_selection(1);
@@ -844,17 +846,17 @@ mod tests {
     fn t_cycles_queue_tab_and_opens_hidden_panel() {
         use crate::app::Shortcut;
         let mut p = player();
-        p.show_queue = true;
-        assert_eq!(p.queue.queue_tab, QueueTab::Queue);
+        p.session.show_queue = true;
+        assert_eq!(p.session.queue.queue_tab, QueueTab::Queue);
         let _ = p.update(Message::Shortcut(Shortcut::CycleQueueTab));
-        assert_eq!(p.queue.queue_tab, QueueTab::RecentlyPlayed);
+        assert_eq!(p.session.queue.queue_tab, QueueTab::RecentlyPlayed);
         let _ = p.update(Message::Shortcut(Shortcut::CycleQueueTab));
-        assert_eq!(p.queue.queue_tab, QueueTab::Queue);
+        assert_eq!(p.session.queue.queue_tab, QueueTab::Queue);
 
-        p.show_queue = false;
+        p.session.show_queue = false;
         let _ = p.update(Message::Shortcut(Shortcut::CycleQueueTab));
-        assert!(p.show_queue);
-        assert_eq!(p.queue.queue_tab, QueueTab::RecentlyPlayed);
+        assert!(p.session.show_queue);
+        assert_eq!(p.session.queue.queue_tab, QueueTab::RecentlyPlayed);
     }
 
     #[test]
@@ -876,7 +878,7 @@ mod tests {
     fn escape_closes_context_menu() {
         use crate::app::{Dialog, Shortcut};
         let mut p = player();
-        let pane = p.focused_pane_id;
+        let pane = p.session.focused;
         let _ = p.move_hovered(TrackPos::new(0, pane));
         let _ = p.update(Message::Shortcut(Shortcut::OpenMenu));
         assert!(matches!(p.dialog, Some(Dialog::ContextMenu(_))));
@@ -913,7 +915,7 @@ mod tests {
     fn double_g_jumps_to_first_row() {
         use crate::app::Shortcut;
         let mut p = player();
-        let pane = p.focused_pane_id;
+        let pane = p.session.focused;
         let _ = p.move_hovered_to_edge(false);
         assert_eq!(p.drag.hovered_track(), Some(TrackPos::new(2, pane)));
         let _ = p.update(Message::Shortcut(Shortcut::VimG));

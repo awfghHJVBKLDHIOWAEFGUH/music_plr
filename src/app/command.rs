@@ -270,7 +270,7 @@ impl CommandId {
     /// The message that runs this action against the live player (the focused
     /// pane owns the view-level ones).
     pub fn message(self, player: &MusicPlayer) -> Message {
-        let pane = player.focused_pane_id;
+        let pane = player.session.focused;
         match self {
             Self::PlayPause => Message::TogglePlayPause,
             Self::NextTrack => Message::NextTrack,

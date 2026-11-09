@@ -205,7 +205,7 @@ pub(super) fn view_card_menu<'a>(
                 i,
                 focused,
                 false,
-                action.to_message(),
+                (*action).into(),
                 row_len,
             )
         })

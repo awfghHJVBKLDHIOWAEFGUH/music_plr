@@ -13,6 +13,7 @@ use musicbrainz_rs::{
 };
 
 use crate::{
+    data::library::LibraryKind,
     providers::{
         ArtistAlbumCard, ArtistHeader, ArtistPage, CardData, ProviderId, SearchScope, SearchTab,
     },
@@ -40,20 +41,20 @@ fn from_mb_recording(rec: &Recording) -> Track {
 /// enclosing release's title/MBID rather than relying on the recording's own
 /// (often empty) `releases` list.
 fn from_mb_track(rec: &Recording, album: Option<&TrackAlbum>, thumbnail: &str) -> Track {
-    let artist_credit = rec.artist_credit.as_ref().and_then(|ac| ac.first());
-    let artist = artist_credit.map(|a| a.name.clone()).unwrap_or_default();
-    let artist_id = artist_credit.map(|a| a.artist.id.clone());
+    let credits = rec.artist_credit.as_deref().unwrap_or_default();
+    let artists: Vec<String> = credits.iter().map(|a| a.name.clone()).collect();
+    let artist_ids: Vec<String> = credits.iter().map(|a| a.artist.id.clone()).collect();
 
-    Track::from_provider(
+    Track::from_provider_artists(
         ProviderId::MusicBrainz,
         rec.id.clone(),
         String::new(),
         rec.title.clone(),
-        artist,
+        artists,
         rec.length.unwrap_or(0) / 1000,
         thumbnail.to_string(),
         album.cloned(),
-        artist_id,
+        artist_ids,
     )
 }
 
@@ -69,12 +70,16 @@ pub fn search(query: &str, scope: SearchScope, offset: usize) -> (Vec<Track>, Se
                 .map(|r| {
                     r.entities
                         .into_iter()
-                        .map(|a| CardData {
-                            url: format!("https://musicbrainz.org/artist/{}", a.id),
-                            id: a.id,
-                            title: a.name,
-                            subtitle: String::new(),
-                            thumbnail: String::new(),
+                        .map(|a| {
+                            CardData::new(
+                                LibraryKind::Artist,
+                                ProviderId::MusicBrainz,
+                                a.id.clone(),
+                                a.name,
+                                "",
+                                "",
+                                format!("https://musicbrainz.org/artist/{}", a.id),
+                            )
                         })
                         .collect()
                 })
@@ -89,11 +94,8 @@ pub fn search(query: &str, scope: SearchScope, offset: usize) -> (Vec<Track>, Se
                 .map(|r| {
                     r.entities
                         .into_iter()
-                        .map(|rel| CardData {
-                            url: format!("https://musicbrainz.org/release/{}", rel.id),
-                            id: rel.id,
-                            title: rel.title,
-                            subtitle: rel
+                        .map(|rel| {
+                            let subtitle = rel
                                 .artist_credit
                                 .map(|credit| {
                                     credit
@@ -102,8 +104,16 @@ pub fn search(query: &str, scope: SearchScope, offset: usize) -> (Vec<Track>, Se
                                         .collect::<Vec<_>>()
                                         .join(", ")
                                 })
-                                .unwrap_or_default(),
-                            thumbnail: String::new(),
+                                .unwrap_or_default();
+                            CardData::new(
+                                LibraryKind::Album,
+                                ProviderId::MusicBrainz,
+                                rel.id.clone(),
+                                rel.title,
+                                subtitle,
+                                "",
+                                format!("https://musicbrainz.org/release/{}", rel.id),
+                            )
                         })
                         .collect()
                 })
@@ -225,22 +235,24 @@ pub fn fetch_artist_page(
         .release_groups
         .unwrap_or_default()
         .iter()
-        .map(|rg| ArtistAlbumCard {
-            id: rg.id.clone(),
-            title: rg.title.clone(),
-            date: rg
-                .first_release_date
-                .as_ref()
-                .map(|d| d.0.chars().take(4).collect())
-                .unwrap_or_default(),
-            badge: match rg.primary_type.as_ref() {
-                Some(PrimaryType::Album) => "Album".to_string(),
-                Some(PrimaryType::Ep) => "EP".to_string(),
-                Some(PrimaryType::Single) => "Single".to_string(),
-                _ => String::new(),
-            },
-            thumbnail: format!("https://coverartarchive.org/release-group/{}/front", rg.id),
-            url: format!("https://musicbrainz.org/release-group/{}", rg.id),
+        .map(|rg| {
+            ArtistAlbumCard::new(
+                ProviderId::MusicBrainz,
+                rg.id.clone(),
+                rg.title.clone(),
+                match rg.primary_type.as_ref() {
+                    Some(PrimaryType::Album) => "Album",
+                    Some(PrimaryType::Ep) => "EP",
+                    Some(PrimaryType::Single) => "Single",
+                    _ => "",
+                },
+                rg.first_release_date
+                    .as_ref()
+                    .map(|d| d.0.chars().take(4).collect::<String>())
+                    .unwrap_or_default(),
+                format!("https://coverartarchive.org/release-group/{}/front", rg.id),
+                format!("https://musicbrainz.org/release-group/{}", rg.id),
+            )
         })
         .collect();
     Ok(ArtistPage {

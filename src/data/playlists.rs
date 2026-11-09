@@ -61,10 +61,22 @@ impl PlaylistStore {
     /// Same unique-naming/positioning as [`Self::create_at`], but stores
     /// `tracks` as-is (no dedup) with a single save.
     pub fn create_with_tracks_at(&mut self, name: &str, pos: usize, tracks: Vec<Track>) -> usize {
+        let pos = self.create_with_tracks_at_unsaved(name, pos, tracks);
+        self.save();
+        pos
+    }
+
+    /// [`create_with_tracks_at`](Self::create_with_tracks_at) without the
+    /// write, for callers batching several inserts into one save.
+    pub fn create_with_tracks_at_unsaved(
+        &mut self,
+        name: &str,
+        pos: usize,
+        tracks: Vec<Track>,
+    ) -> usize {
         let name = self.unique_name(name);
         let pos = pos.min(self.playlists.len());
         self.playlists.insert(pos, Playlist { name, tracks });
-        self.save();
         pos
     }
 
@@ -136,7 +148,7 @@ mod tests {
             ProviderTrack {
                 id: id.to_string(),
                 url: id.to_string(),
-                artist_id: None,
+                artist_ids: Vec::new(),
                 duration: 0,
                 thumbnail: String::new(),
                 album: None,
@@ -145,7 +157,7 @@ mod tests {
         );
         Track {
             title: id.to_string(),
-            artist: String::new(),
+            artists: Vec::new(),
             source: ProviderId::YouTube,
             providers,
         }
@@ -163,7 +175,7 @@ mod tests {
                         crate::types::ProviderTrack {
                             id: s.to_string(),
                             url: s.to_string(),
-                            artist_id: None,
+                            artist_ids: Vec::new(),
                             duration: 0,
                             thumbnail: String::new(),
                             album: None,
@@ -172,7 +184,7 @@ mod tests {
                     );
                     Track {
                         title: s.to_string(),
-                        artist: String::new(),
+                        artists: Vec::new(),
                         source: crate::providers::ProviderId::YouTube,
                         providers,
                     }

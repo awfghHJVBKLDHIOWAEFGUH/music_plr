@@ -14,10 +14,10 @@ use iced::{
 
 use super::{
     shared_components::{
-        art_card, card_rail, click_card, play_pause_button, section_label, thumbnail,
-        CARD_IMAGE_SIZE,
+        art_card, card_rail, click_card, play_pause_button, section_label, subtitle_artists,
+        thumbnail, CARD_IMAGE_SIZE,
     },
-    styles::{bg_secondary, fg_secondary, icon_style_fg_secondary},
+    styles::{bg_secondary, icon_style_fg_secondary},
     theme, Message, MusicPlayer,
 };
 use crate::{
@@ -25,12 +25,13 @@ use crate::{
         home::{HomeRailId, HomeTrackSource},
         pane::PaneId,
         update::operation::RailKey,
+        view_data::CardMenuTarget,
         ViewData, ViewKind,
     },
-    data::library::LibraryItem,
+    data::library::LibraryKind,
     icons,
     load_state::LoadState,
-    providers::{HomeCard, HomeSection, HomeSectionData, ProviderId},
+    providers::{CardData, HomeSection, HomeSectionData, ProviderId},
     theme::AppTheme,
 };
 
@@ -142,7 +143,7 @@ fn header(player: &MusicPlayer, pane: PaneId) -> Element<'_, Message, AppTheme> 
 }
 
 fn continue_strip(player: &MusicPlayer) -> Option<Element<'_, Message, AppTheme>> {
-    let track = player.queue.current()?;
+    let track = player.session.queue.current()?;
     let dir = player.strings.direction;
     let image = thumbnail(
         CONTINUE_IMAGE_SIZE,
@@ -150,10 +151,7 @@ fn continue_strip(player: &MusicPlayer) -> Option<Element<'_, Message, AppTheme>
     );
     let info = iced::widget::Column::with_children([
         text(track.title.clone()).size(theme::TEXT_SIZE_MD).into(),
-        text(track.artist.clone())
-            .size(theme::TEXT_SIZE_SM)
-            .style(fg_secondary())
-            .into(),
+        subtitle_artists(player.session.focused, track, dir),
     ])
     .spacing(theme::SPACING_XXS)
     .width(Length::Fill);
@@ -225,7 +223,7 @@ fn track_tile<'a>(
         CARD_IMAGE_SIZE,
         player.thumbnail_index.get(track.source, track.primary_id()),
     );
-    click_card(image, &track.title, &track.artist, message)
+    click_card(image, &track.title, &track.artist_text(), message)
 }
 
 fn recent_rail<'a>(
@@ -233,6 +231,7 @@ fn recent_rail<'a>(
     pane: PaneId,
 ) -> Option<Element<'a, Message, AppTheme>> {
     let tracks: Vec<Element<'a, Message, AppTheme>> = player
+        .session
         .queue
         .recently_played
         .iter()
@@ -312,7 +311,7 @@ fn library_rail<'a>(
             art_card(
                 player,
                 pane,
-                ViewKind::from(item.as_ref()),
+                CardMenuTarget::new(item.clone()),
                 &item.title,
                 "",
                 RailKey::Home(HomeRailId::Library),
@@ -371,17 +370,18 @@ fn server_playlists_rail<'a>(
         .for_provider(provider)
         .take(20)
         .map(|entry| {
-            let kind = ViewKind::PlaylistView(crate::app::view_data::PlaylistRef {
-                id: entry.id.clone(),
-                name: entry.name.clone(),
+            let item = crate::data::library::Card::new(crate::data::library::LibraryItem {
+                kind: LibraryKind::Playlist,
                 provider: entry.provider,
+                id: entry.id.clone(),
+                title: entry.name.clone(),
                 thumbnail: entry.thumbnail.clone(),
                 url: String::new(),
             });
             art_card(
                 player,
                 pane,
-                kind,
+                CardMenuTarget::new(item),
                 &entry.name,
                 &entry.track_count.to_string(),
                 RailKey::Home(HomeRailId::ServerPlaylists(provider)),
@@ -405,7 +405,7 @@ fn section_rail<'a>(
     section: &'a HomeSection,
 ) -> Element<'a, Message, AppTheme> {
     let rail_id = HomeRailId::Section(section.key);
-    let cards: Vec<Element<'a, Message, AppTheme>> = match &section.data {
+    let cards: Vec<Element<'a, Message, AppTheme>> = match section.data.as_ref() {
         HomeSectionData::Tracks(tracks) => tracks
             .iter()
             .enumerate()
@@ -441,14 +441,13 @@ fn card_rail_tile<'a>(
     player: &'a MusicPlayer,
     pane: PaneId,
     rail: HomeRailId,
-    card: &'a HomeCard,
+    card: &'a CardData,
 ) -> Element<'a, Message, AppTheme> {
-    let item = LibraryItem::from(card);
     art_card(
         player,
         pane,
-        ViewKind::from(&item),
-        &card.title,
+        CardMenuTarget::new(card.card.clone()),
+        &card.card.title,
         &card.subtitle,
         RailKey::Home(rail),
     )
@@ -473,28 +472,28 @@ mod tests {
             home.sections.push(HomeSection::new(
                 HomeSectionKey::new(server, HomeSectionKind::Discover),
                 String::new(),
-                HomeSectionData::Cards(vec![HomeCard {
-                    kind: crate::data::library::LibraryKind::Album,
-                    provider: server,
-                    id: "al-1".to_string(),
-                    title: "Server album".to_string(),
-                    subtitle: "Artist".to_string(),
-                    thumbnail: String::new(),
-                    url: String::new(),
-                }]),
+                HomeSectionData::Cards(vec![CardData::new(
+                    LibraryKind::Album,
+                    server,
+                    "al-1",
+                    "Server album",
+                    "Artist",
+                    "",
+                    "",
+                )]),
             ));
             home.sections.push(HomeSection::new(
                 HomeSectionKey::new(ProviderId::Bandcamp, HomeSectionKind::NewReleases),
                 String::new(),
-                HomeSectionData::Cards(vec![HomeCard {
-                    kind: crate::data::library::LibraryKind::Album,
-                    provider: ProviderId::Bandcamp,
-                    id: "1:2:a".to_string(),
-                    title: "Album".to_string(),
-                    subtitle: "Artist".to_string(),
-                    thumbnail: String::new(),
-                    url: String::new(),
-                }]),
+                HomeSectionData::Cards(vec![CardData::new(
+                    LibraryKind::Album,
+                    ProviderId::Bandcamp,
+                    "1:2:a",
+                    "Album",
+                    "Artist",
+                    "",
+                    "",
+                )]),
             ));
         }
         view
@@ -514,16 +513,17 @@ mod tests {
             crate::data::custom_providers::CustomProviderKind::Subsonic,
             1,
         );
-        player
-            .server_playlists
-            .entries
-            .push(crate::data::server_playlists::ServerPlaylistEntry {
-                provider: server,
-                id: "pl-1".to_string(),
-                name: "Server playlist".to_string(),
-                thumbnail: String::new(),
-                track_count: 4,
-            });
+        player.server_playlists.entries.push(
+            crate::data::server_playlists::ServerPlaylistEntry::new(
+                server,
+                crate::providers::ServerPlaylist {
+                    id: "pl-1".to_string(),
+                    name: "Server playlist".to_string(),
+                    thumbnail: String::new(),
+                    track_count: 4,
+                },
+            ),
+        );
         let mut view = home_view();
         view.content = LoadState::Ready(Vec::new());
         player.reset_test_pane(vec![view]);

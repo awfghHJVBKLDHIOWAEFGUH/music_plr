@@ -6,27 +6,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use super::{JsonStore, StoreLocation};
-use crate::lyrics::{LyricLine, Lyrics, LyricsProvider, TranslatedLyrics};
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct CachedLyrics {
-    pub plain: String,
-    pub lines: Vec<LyricLine>,
-    pub provider: LyricsProvider,
-    #[serde(default)]
-    pub translations: Vec<TranslatedLyrics>,
-}
-
-impl CachedLyrics {
-    pub fn to_lyrics(&self) -> Lyrics {
-        Lyrics {
-            lines: self.lines.clone(),
-            plain: self.plain.clone(),
-            provider: self.provider,
-            translations: self.translations.clone(),
-        }
-    }
-}
+use crate::lyrics::{LyricLine, Lyrics, LyricsProvider};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CustomLyricsEntry {
@@ -35,11 +15,11 @@ pub struct CustomLyricsEntry {
     pub lines: Vec<LyricLine>,
 }
 
-impl CustomLyricsEntry {
-    pub fn to_lyrics(&self) -> Lyrics {
+impl From<&CustomLyricsEntry> for Lyrics {
+    fn from(entry: &CustomLyricsEntry) -> Self {
         Lyrics {
-            lines: self.lines.clone(),
-            plain: self.plain.clone(),
+            lines: entry.lines.clone(),
+            plain: entry.plain.clone(),
             provider: LyricsProvider::Custom,
             translations: Vec::new(),
         }
@@ -57,7 +37,7 @@ const LYRICS_CACHE_VERSION: u32 = 2;
 pub struct LyricsCache {
     #[serde(default)]
     version: u32,
-    entries: HashMap<String, Vec<CachedLyrics>>,
+    entries: HashMap<String, Vec<Lyrics>>,
     #[serde(default)]
     custom: HashMap<String, Vec<CustomLyricsEntry>>,
 }
@@ -114,27 +94,21 @@ impl LyricsCache {
         self.entries
             .get(track_key)
             .and_then(|list| list.iter().find(|e| e.provider == provider))
-            .map(CachedLyrics::to_lyrics)
+            .cloned()
     }
 
     /// Store lyrics for a track key, upserting the per-provider entry (the
     /// same provider's prior entry is replaced; other providers are
     /// preserved). `track_key` must be the provider-namespaced `slug:id` key.
-    pub fn insert(&mut self, track_key: &str, lyrics: &Lyrics) {
+    /// Does not write to disk: the caller batches a [`save`](JsonStore::save)
+    /// after its updates.
+    pub fn insert(&mut self, track_key: &str, lyrics: Lyrics) {
         let list = self.entries.entry(track_key.to_string()).or_default();
         if let Some(slot) = list.iter_mut().find(|e| e.provider == lyrics.provider) {
-            slot.plain.clone_from(&lyrics.plain);
-            slot.lines.clone_from(&lyrics.lines);
-            slot.translations.clone_from(&lyrics.translations);
+            *slot = lyrics;
         } else {
-            list.push(CachedLyrics {
-                plain: lyrics.plain.clone(),
-                lines: lyrics.lines.clone(),
-                provider: lyrics.provider,
-                translations: lyrics.translations.clone(),
-            });
+            list.push(lyrics);
         }
-        self.save();
     }
 
     /// Names of the user-added custom lyrics for a track, in creation order.
@@ -151,16 +125,12 @@ impl LyricsCache {
             .get(track_key)?
             .iter()
             .find(|e| e.name == name)
-            .map(CustomLyricsEntry::to_lyrics)
+            .map(Lyrics::from)
     }
 
-    /// Store a named custom entry, upserting on the name.
+    /// Store a named custom entry, upserting on the name. Does not write to
+    /// disk; the caller saves once after its updates.
     pub fn insert_custom(&mut self, track_key: &str, name: &str, lyrics: &Lyrics) {
-        self.insert_custom_inner(track_key, name, lyrics);
-        self.save();
-    }
-
-    fn insert_custom_inner(&mut self, track_key: &str, name: &str, lyrics: &Lyrics) {
         let list = self.custom.entry(track_key.to_string()).or_default();
         if let Some(slot) = list.iter_mut().find(|e| e.name == name) {
             slot.plain.clone_from(&lyrics.plain);
@@ -174,18 +144,16 @@ impl LyricsCache {
         }
     }
 
-    /// Delete one named custom entry; true when something was removed.
+    /// Delete one named custom entry; true when something was removed. Does
+    /// not write to disk; the caller saves once after its updates.
     pub fn remove_custom(&mut self, track_key: &str, name: &str) -> bool {
         let removed = self.custom.get_mut(track_key).is_some_and(|list| {
             let before = list.len();
             list.retain(|e| e.name != name);
             before != list.len()
         });
-        if removed {
-            if self.custom.get(track_key).is_some_and(Vec::is_empty) {
-                self.custom.remove(track_key);
-            }
-            self.save();
+        if removed && self.custom.get(track_key).is_some_and(Vec::is_empty) {
+            self.custom.remove(track_key);
         }
         removed
     }
@@ -203,7 +171,7 @@ mod tests {
     fn migration_drops_fetched_entries_but_keeps_custom() {
         use crate::providers::ProviderId;
         let mut cache = LyricsCache::default();
-        cache.insert("t1", &custom_lyrics("la"));
+        cache.insert("t1", custom_lyrics("la"));
         cache.insert_custom("t1", "Mine", &custom_lyrics("mine"));
         assert!(cache.get_for("t1", LyricsProvider::Custom).is_some());
         cache.version = 0;
@@ -217,7 +185,7 @@ mod tests {
     #[test]
     fn migration_is_noop_when_current() {
         let mut cache = LyricsCache::default();
-        cache.insert("t1", &custom_lyrics("la"));
+        cache.insert("t1", custom_lyrics("la"));
         cache.version = LYRICS_CACHE_VERSION;
         cache.migrate();
         assert!(cache.get_for("t1", LyricsProvider::Custom).is_some());
@@ -307,7 +275,7 @@ mod tests {
     fn migration_namespaces_bare_custom_keys_as_youtube() {
         use crate::providers::ProviderId;
         let mut cache = LyricsCache::default();
-        cache.insert_custom_inner("abc", "Mine", &custom_lyrics("legacy"));
+        cache.insert_custom("abc", "Mine", &custom_lyrics("legacy"));
         cache.version = 0;
         cache.migrate();
         let namespaced = ProviderId::YouTube.cache_key("abc");
@@ -323,7 +291,7 @@ mod tests {
     fn migration_keeps_colons_in_bare_ids() {
         use crate::providers::ProviderId;
         let mut cache = LyricsCache::default();
-        cache.insert_custom_inner("1:2:a", "Mine", &custom_lyrics("legacy"));
+        cache.insert_custom("1:2:a", "Mine", &custom_lyrics("legacy"));
         cache.version = 0;
         cache.migrate();
         let namespaced = ProviderId::YouTube.cache_key("1:2:a");

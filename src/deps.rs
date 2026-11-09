@@ -1,23 +1,15 @@
 //! Runtime dependency detection and self-installation.
 //!
-//! `goosemusic` shells out to external tools. `yt-dlp` (streaming, downloads,
-//! search fallback) ships standalone per-OS binaries on its GitHub releases,
-//! so it can be downloaded by the app itself into the data directory.
-//! `ytmusicapi` (nicer `YouTube` Music search) is an optional `Python` package
-//! installed via `pip` into an app-managed venv at `data/venv` (never into the
-//! system Python, so Debian/Ubuntu's `externally-managed-environment` never
-//! triggers); without it the app falls back to `yt-dlp` for search. Python 3
-//! itself can be auto-installed from the `python-build-standalone` project
-//! (standalone, relocatable builds that include pip), or found on the system
-//! PATH.
+//! `goosemusic` shells out to `yt-dlp` (streaming, downloads, search fallback).
+//! It ships standalone per-OS binaries on its GitHub releases, so it can be
+//! downloaded by the app itself into the data directory.
 //!
 //! Managed copies live under the data directory (`~/.local/share/goosemusic`);
 //! older cache-directory copies (`~/.cache/goosemusic`) are migrated on
 //! startup by [`migrate_managed_deps_to_data`].
 //!
-//! The pinned versions + SHA-256 maps (see [`YT_DLP_VERSION`],
-//! [`PYTHON_VERSION`], etc.) let downloads be verified instead of blindly
-//! executing whatever the hosting service provides.
+//! The pinned version + SHA-256 map (see [`YT_DLP_VERSION`]) lets downloads be
+//! verified instead of blindly executing whatever the hosting service provides.
 
 #![allow(clippy::unreadable_literal)]
 
@@ -26,7 +18,6 @@ use std::{
     path::PathBuf,
     process::Command,
     sync::{OnceLock, RwLock},
-    time::Duration,
 };
 
 use anyhow::{Context, Result};
@@ -35,40 +26,29 @@ use anyhow::{Context, Result};
 /// updated to match the new release's `SHA2-256SUMS`.
 pub const YT_DLP_VERSION: &str = "2026.08.19";
 
-/// Pinned python-build-standalone release tag.
-pub const PYTHON_PBS_RELEASE: &str = "20260807";
-
-/// Pinned `CPython` version inside the above release.
-pub const PYTHON_VERSION: &str = "3.13.15";
-
-/// External tools the app may need. `Python3` is never auto-installed (it's an
-/// OS package); the rest the app can fetch itself.
+/// External tools the app may need.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DepKind {
     YtDlp,
-    YtMusicApi,
-    Python3,
 }
 
 impl DepKind {
     pub fn name(self) -> &'static str {
         match self {
             DepKind::YtDlp => "yt-dlp",
-            DepKind::YtMusicApi => "ytmusicapi",
-            DepKind::Python3 => "Python 3",
         }
     }
 
     /// Whether the app can download/install this dependency itself.
     pub fn auto_installable(self) -> bool {
         match self {
-            DepKind::YtDlp | DepKind::YtMusicApi | DepKind::Python3 => true,
+            DepKind::YtDlp => true,
         }
     }
 
     /// All dependency kinds, for iteration in the Settings / startup dialogs.
     pub fn all() -> &'static [DepKind] {
-        &[DepKind::YtDlp, DepKind::YtMusicApi, DepKind::Python3]
+        &[DepKind::YtDlp]
     }
 }
 
@@ -113,227 +93,6 @@ fn yt_dlp_expected_sha256(asset: &str) -> &'static str {
         "yt-dlp_arm64.exe" => "05b438997bafc3affdfda9d041353c9d73e04dc842207254b655b0887c4445b0",
         _ => "",
     }
-}
-
-/// The python-build-standalone `install_only_stripped` archive for the current
-/// target platform. These are the smallest archives that include Python, pip,
-/// and the standard library.
-fn python_asset() -> &'static str {
-    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-    {
-        "cpython-3.13.15+20260807-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz"
-    }
-    #[cfg(all(target_os = "linux", not(target_arch = "aarch64")))]
-    {
-        "cpython-3.13.15+20260807-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
-    }
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    {
-        "cpython-3.13.15+20260807-aarch64-apple-darwin-install_only_stripped.tar.gz"
-    }
-    #[cfg(all(target_os = "macos", not(target_arch = "aarch64")))]
-    {
-        "cpython-3.13.15+20260807-x86_64-apple-darwin-install_only_stripped.tar.gz"
-    }
-    #[cfg(all(target_os = "windows", not(target_arch = "aarch64")))]
-    {
-        "cpython-3.13.15+20260807-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"
-    }
-    #[cfg(not(any(
-        all(target_os = "linux"),
-        all(target_os = "macos"),
-        all(target_os = "windows", not(target_arch = "aarch64"))
-    )))]
-    {
-        ""
-    }
-}
-
-/// Expected SHA-256 of [`python_asset`] for the pinned release.
-fn python_expected_sha256(asset: &str) -> &'static str {
-    match asset {
-        "cpython-3.13.15+20260807-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz" => {
-            "faae10a9faa9bec06da009ac69326cc1d9691dc138fec6a1b69159dff1781f35"
-        }
-        "cpython-3.13.15+20260807-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz" => {
-            "1dfc9565c26f8892a33202b5966bdf9ff45c56a57b06e8fa65fecf05030afe5b"
-        }
-        "cpython-3.13.15+20260807-x86_64-apple-darwin-install_only_stripped.tar.gz" => {
-            "187eed2282e9c3a5b6b14953d564ee25a9f35cf2c209c9fa292186ee48b0e4a1"
-        }
-        "cpython-3.13.15+20260807-aarch64-apple-darwin-install_only_stripped.tar.gz" => {
-            "dbadb0ffe46f8bace50daaf8a0c5fc6903c003690776da9eb5269e33c856bb53"
-        }
-        "cpython-3.13.15+20260807-x86_64-pc-windows-msvc-install_only_stripped.tar.gz" => {
-            "44bf9ae71f4b45e3ba3104ae331c6eff3f7002593c26fd12453eb9310c4f259a"
-        }
-        _ => "",
-    }
-}
-
-/// The data directory for the standalone Python installation.
-fn python_data_path() -> PathBuf {
-    crate::data::data_path("python").join(PYTHON_VERSION)
-}
-
-/// Pre-migration cache location of the standalone Python installation.
-fn python_legacy_path() -> PathBuf {
-    crate::data::cache_path("python").join(PYTHON_VERSION)
-}
-
-fn standalone_python_bin(base: &std::path::Path) -> PathBuf {
-    #[cfg(target_os = "windows")]
-    {
-        base.join("python").join("python.exe")
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        base.join("python").join("bin").join("python3")
-    }
-}
-
-fn standalone_python() -> Option<PathBuf> {
-    let data_bin = standalone_python_bin(&python_data_path());
-    if data_bin.exists() {
-        return Some(data_bin);
-    }
-    let legacy_bin = standalone_python_bin(&python_legacy_path());
-    legacy_bin.exists().then_some(legacy_bin)
-}
-
-/// The app-managed venv (`~/.local/share/goosemusic/venv`) that carries
-/// `ytmusicapi`, isolated from the system Python.
-pub(crate) fn venv_dir() -> PathBuf {
-    crate::data::data_path("venv")
-}
-
-pub(crate) fn venv_python() -> PathBuf {
-    #[cfg(target_os = "windows")]
-    {
-        venv_dir().join("Scripts").join("python.exe")
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        venv_dir().join("bin").join("python")
-    }
-}
-
-fn existing_venv_python() -> Option<PathBuf> {
-    let primary = venv_python();
-    if primary.exists() {
-        return Some(primary);
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let alt = venv_dir().join("bin").join("python3");
-        if alt.exists() {
-            return Some(alt);
-        }
-    }
-    None
-}
-
-fn probe_python(exe: &str) -> Option<PathBuf> {
-    Command::new(exe)
-        .arg("--version")
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|_| PathBuf::from(exe))
-}
-
-fn system_python_cached() -> Option<PathBuf> {
-    static CACHE: OnceLock<Option<PathBuf>> = OnceLock::new();
-    CACHE
-        .get_or_init(|| ["python3", "python"].into_iter().find_map(probe_python))
-        .clone()
-}
-
-/// Resolve the Python 3 interpreter to invoke. Resolution order:
-///   1. `GOOSEMUSIC_PYTHON` env var override
-///   2. App-managed venv (`data/venv`)
-///   3. Previously downloaded standalone copy (data dir, then legacy cache)
-///   4. `python3` / `python` resolved via PATH
-///
-/// Managed paths are probed fresh on every call (cheap existence checks) so a
-/// just-installed or just-migrated copy is picked up immediately; only the
-/// PATH probe is cached.
-///
-/// Returns `None` when no Python 3 is available.
-pub(crate) fn python_exe() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("GOOSEMUSIC_PYTHON") {
-        let path = PathBuf::from(&p);
-        if path.exists() {
-            return Some(path);
-        }
-    }
-    if let Some(p) = existing_venv_python() {
-        return Some(p);
-    }
-    if let Some(p) = standalone_python() {
-        return Some(p);
-    }
-    system_python_cached()
-}
-
-/// Every Python that could carry `ytmusicapi`, preferred first, deduplicated.
-/// Used to probe for the package and as a fallback chain when running the
-/// helper script.
-pub(crate) fn candidate_pythons() -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    let mut push = |p: Option<PathBuf>| {
-        if let Some(p) = p {
-            if !out.contains(&p) {
-                out.push(p);
-            }
-        }
-    };
-    if let Ok(p) = std::env::var("GOOSEMUSIC_PYTHON") {
-        let path = PathBuf::from(&p);
-        if path.exists() {
-            push(Some(path));
-        }
-    }
-    push(existing_venv_python());
-    push(standalone_python());
-    if let Some(legacy) = standalone_python_legacy_only() {
-        push(Some(legacy));
-    }
-    for exe in ["python3", "python"] {
-        if Command::new(exe)
-            .arg("--version")
-            .output()
-            .is_ok_and(|o| o.status.success())
-        {
-            push(Some(PathBuf::from(exe)));
-        }
-    }
-    out
-}
-
-fn standalone_python_legacy_only() -> Option<PathBuf> {
-    let data_bin = standalone_python_bin(&python_data_path());
-    if standalone_python().as_ref() == Some(&data_bin) {
-        return None;
-    }
-    let legacy_bin = standalone_python_bin(&python_legacy_path());
-    legacy_bin.exists().then_some(legacy_bin)
-}
-
-pub(crate) fn python3_present() -> bool {
-    python_exe().is_some()
-}
-
-/// Check if a specific Python interpreter has ytmusicapi installed.
-fn has_ytmusicapi(py: &PathBuf) -> bool {
-    Command::new(py)
-        .args(["-c", "import ytmusicapi"])
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
-fn ytmusicapi_present() -> bool {
-    candidate_pythons().iter().any(has_ytmusicapi)
 }
 
 /// The data-directory path for the pinned `yt-dlp` build (if present).
@@ -402,15 +161,27 @@ pub(crate) fn migrate_one(old: &std::path::Path, new: &std::path::Path) {
 /// Move managed copies from the old cache directory to the data directory.
 /// Idempotent and best-effort: moves only when the old path exists and the new
 /// one doesn't, never deletes user data, never fails startup.
+///
+/// Also removes the directories the deleted Python/`ytmusicapi` backend used to
+/// own. Only paths the app itself created are touched, and failures are logged.
+#[cfg(not(test))]
 pub fn migrate_managed_deps_to_data() {
     migrate_one(
         &crate::data::cache_path("yt-dlp"),
         &crate::data::data_path("yt-dlp"),
     );
-    migrate_one(
-        &crate::data::cache_path("python"),
-        &crate::data::data_path("python"),
-    );
+    for orphan in [
+        crate::data::data_path("python"),
+        crate::data::data_path("venv"),
+        crate::data::cache_path("python"),
+    ] {
+        if orphan.exists() {
+            match std::fs::remove_dir_all(&orphan) {
+                Ok(()) => tracing::info!("Removed orphaned {}", orphan.display()),
+                Err(e) => tracing::warn!("Failed to remove {}: {e}", orphan.display()),
+            }
+        }
+    }
 }
 
 static YT_DLP_PATH_PROBE: OnceLock<bool> = OnceLock::new();
@@ -498,8 +269,6 @@ pub(crate) fn cookie_args() -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Detect which dependencies are missing, returning them for the startup
-/// dialog. Cheap: a couple of short `--version`/`import` probes.
 /// Runtime availability of the external tools, cached from the last detection
 /// (or updated as the user installs them from the startup dialog). The OS
 /// environment is process-global, so this is a global cache read by
@@ -508,15 +277,9 @@ pub(crate) fn cookie_args() -> Vec<String> {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DepAvailability {
     pub yt_dlp: bool,
-    pub ytmusicapi: bool,
-    pub python3: bool,
 }
 
-static AVAILABILITY: RwLock<DepAvailability> = RwLock::new(DepAvailability {
-    yt_dlp: false,
-    ytmusicapi: false,
-    python3: false,
-});
+static AVAILABILITY: RwLock<DepAvailability> = RwLock::new(DepAvailability { yt_dlp: false });
 
 /// Current external-tool availability (drives per-provider capabilities).
 pub fn availability() -> DepAvailability {
@@ -538,8 +301,6 @@ pub fn set_available(kind: DepKind) {
     let mut a = availability();
     match kind {
         DepKind::YtDlp => a.yt_dlp = true,
-        DepKind::YtMusicApi => a.ytmusicapi = true,
-        DepKind::Python3 => a.python3 = true,
     }
     set_availability(a);
 }
@@ -550,26 +311,20 @@ pub fn is_available(kind: DepKind) -> bool {
     let a = availability();
     match kind {
         DepKind::YtDlp => a.yt_dlp,
-        DepKind::YtMusicApi => a.ytmusicapi,
-        DepKind::Python3 => a.python3,
     }
 }
 
 /// Whether the app has installed its own managed copy of `kind` (as opposed to
-/// relying on a system-provided one). For `yt-dlp` this is the downloaded
-/// binary; for `ytmusicapi` it's the app-managed venv (pre-venv pip installs
-/// count as system packages). The app can only remove deps it manages itself,
-/// so this doubles as the uninstall guard.
+/// relying on a system-provided one). The app can only remove deps it manages
+/// itself, so this doubles as the uninstall guard.
 pub fn installed_via_app(kind: DepKind) -> bool {
     match kind {
         DepKind::YtDlp => yt_dlp_data_path().exists() || yt_dlp_legacy_path().exists(),
-        DepKind::YtMusicApi => venv_dir().exists(),
-        DepKind::Python3 => python_data_path().exists() || python_legacy_path().exists(),
     }
 }
 
 /// Remove the app-managed copy of `kind` (falls back to any system-provided
-/// one). Returns an error for kinds the app cannot uninstall.
+/// one).
 pub fn uninstall(kind: DepKind) -> Result<()> {
     match kind {
         DepKind::YtDlp => {
@@ -587,68 +342,28 @@ pub fn uninstall(kind: DepKind) -> Result<()> {
             set_availability(a);
             Ok(())
         }
-        DepKind::YtMusicApi => {
-            if venv_dir().exists() {
-                std::fs::remove_dir_all(venv_dir())
-                    .with_context(|| format!("Failed to remove {}", venv_dir().display()))?;
-            }
-            let python3 = python3_present();
-            let mut a = availability();
-            a.python3 = python3;
-            a.ytmusicapi = python3 && ytmusicapi_present();
-            set_availability(a);
-            Ok(())
-        }
-        DepKind::Python3 => {
-            for dir in [
-                crate::data::data_path("python"),
-                crate::data::cache_path("python"),
-            ] {
-                if dir.exists() {
-                    std::fs::remove_dir_all(&dir)
-                        .with_context(|| format!("Failed to remove {}", dir.display()))?;
-                }
-            }
-            let mut a = availability();
-            a.python3 = python3_present();
-            set_availability(a);
-            Ok(())
-        }
     }
 }
 
+/// Detect which dependencies are missing, returning them for the startup
+/// dialog. Cheap: one short `yt-dlp --version` probe (cached).
 pub fn detect_missing() -> Vec<DepKind> {
     #[cfg(not(test))]
     migrate_managed_deps_to_data();
     let yt_dlp = resolve_yt_dlp().is_some();
-    let python3 = python3_present();
-    let ytmusicapi = python3 && ytmusicapi_present();
-    set_availability(DepAvailability {
-        yt_dlp,
-        ytmusicapi,
-        python3,
-    });
+    set_availability(DepAvailability { yt_dlp });
 
     let mut missing = Vec::new();
     if !yt_dlp {
         missing.push(DepKind::YtDlp);
     }
-    if !python3 {
-        missing.push(DepKind::Python3);
-    }
-    if !ytmusicapi {
-        missing.push(DepKind::YtMusicApi);
-    }
     missing
 }
 
-/// Install a single dependency. Auto-installable deps do the work here; calling
-/// this with `Python3` returns an error (the dialog disables that row).
+/// Install a single dependency. Auto-installable deps do the work here.
 pub fn install(kind: DepKind, progress: impl Fn(u64, u64) + 'static) -> Result<()> {
     match kind {
         DepKind::YtDlp => install_yt_dlp(progress),
-        DepKind::YtMusicApi => install_ytmusicapi(),
-        DepKind::Python3 => install_python(progress),
     }
 }
 
@@ -734,133 +449,6 @@ fn install_yt_dlp(progress: impl Fn(u64, u64) + 'static) -> Result<()> {
         .context("Failed to mark yt-dlp executable")?;
     std::fs::rename(&tmp, &path).context("Failed to install yt-dlp")?;
     set_available(DepKind::YtDlp);
-    Ok(())
-}
-
-fn install_python(progress: impl Fn(u64, u64) + 'static) -> Result<()> {
-    let asset = python_asset();
-    if asset.is_empty() {
-        anyhow::bail!("No standalone Python build available for this platform.");
-    }
-    let url = format!(
-        "https://github.com/astral-sh/python-build-standalone/releases/download/{PYTHON_PBS_RELEASE}/{asset}"
-    );
-    let bytes = download_verified(&url, python_expected_sha256(asset), "Python", progress)?;
-
-    let dir = python_data_path();
-    std::fs::create_dir_all(&dir).with_context(|| format!("Failed to create {}", dir.display()))?;
-    let cursor = std::io::Cursor::new(bytes);
-    let gz = flate2::read::GzDecoder::new(cursor);
-    let mut archive = tar::Archive::new(gz);
-    archive
-        .unpack(&dir)
-        .context("Failed to extract Python archive")?;
-
-    let python_bin = {
-        #[cfg(target_os = "windows")]
-        {
-            dir.join("python").join("python.exe")
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            dir.join("python").join("bin").join("python3")
-        }
-    };
-    if !python_bin.exists() {
-        anyhow::bail!(
-            "Python archive extracted but binary not found at {}",
-            python_bin.display()
-        );
-    }
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let bin_dir = dir.join("python").join("bin");
-        for entry in std::fs::read_dir(&bin_dir)
-            .with_context(|| format!("Failed to read {}", bin_dir.display()))?
-        {
-            let entry = entry?;
-            if entry.file_type()?.is_file() {
-                std::fs::set_permissions(entry.path(), PermissionsExt::from_mode(0o755))?;
-            }
-        }
-    }
-
-    set_available(DepKind::Python3);
-    Ok(())
-}
-
-fn base_python_for_venv() -> Option<PathBuf> {
-    if let Some(p) = system_python_cached() {
-        return Some(p);
-    }
-    standalone_python()
-}
-
-fn ensure_venv() -> Result<PathBuf> {
-    if let Some(p) = existing_venv_python() {
-        return Ok(p);
-    }
-    let base = base_python_for_venv()
-        .ok_or_else(|| anyhow::anyhow!("Python 3 not found; install it to use pip."))?;
-    let dir = venv_dir();
-    if let Some(parent) = dir.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create {}", parent.display()))?;
-    }
-    let output = crate::providers::run_command_with_timeout(
-        Command::new(&base).arg("-m").arg("venv").arg(&dir),
-        Duration::from_mins(5),
-    )
-    .context("Failed to create Python venv")?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-        if stderr.contains("ensurepip")
-            || stderr.contains("python3-venv")
-            || stderr.contains("venv is not installed")
-        {
-            anyhow::bail!(
-                "Python venv module missing; install it with `sudo apt install python3-venv python3-pip`, then retry: {stderr}"
-            );
-        }
-        anyhow::bail!("Failed to create Python venv: {stderr}");
-    }
-    existing_venv_python().ok_or_else(|| {
-        anyhow::anyhow!(
-            "Python venv created but interpreter not found at {}",
-            venv_python().display()
-        )
-    })
-}
-
-fn pip_install_ytmusicapi(py: &std::path::Path) -> Result<()> {
-    let output = crate::providers::run_command_with_timeout(
-        Command::new(py).args(["-m", "pip", "install", "ytmusicapi"]),
-        Duration::from_mins(5),
-    )
-    .context("Failed to run pip")?;
-    if !output.status.success() {
-        anyhow::bail!(
-            "pip install ytmusicapi failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-    Ok(())
-}
-
-fn install_ytmusicapi() -> Result<()> {
-    if let Ok(p) = std::env::var("GOOSEMUSIC_PYTHON") {
-        let path = PathBuf::from(&p);
-        if path.exists() {
-            pip_install_ytmusicapi(&path)?;
-            set_available(DepKind::YtMusicApi);
-            return Ok(());
-        }
-    }
-    let venv_py = ensure_venv()?;
-    pip_install_ytmusicapi(&venv_py)?;
-    set_available(DepKind::YtMusicApi);
     Ok(())
 }
 
@@ -969,12 +557,5 @@ mod tests {
         let base = unique_tmp("migrate_noop");
         migrate_one(&base.join("nope"), &base.join("new"));
         assert!(!base.exists());
-    }
-
-    #[test]
-    fn venv_python_lives_next_to_venv_dir() {
-        let venv = super::venv_dir();
-        let py = super::venv_python();
-        assert_eq!(py.parent().unwrap().parent().unwrap(), venv.as_path());
     }
 }

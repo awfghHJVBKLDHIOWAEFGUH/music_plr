@@ -54,7 +54,7 @@ impl MusicPlayer {
         if !install {
             return false;
         }
-        let cached: Vec<(HomeSectionKey, String, HomeSectionData)> = providers
+        let cached: Vec<(HomeSectionKey, String, std::sync::Arc<HomeSectionData>)> = providers
             .iter()
             .flat_map(|&provider| {
                 providers::home::planned_kinds(provider)
@@ -83,9 +83,9 @@ impl MusicPlayer {
         let mut sections = Vec::new();
         for (key, title, data) in cached {
             if key.kind == HomeSectionKind::QuickPicks {
-                if let HomeSectionData::Tracks(tracks) = data {
+                if let HomeSectionData::Tracks(tracks) = &*data {
                     if !tracks.is_empty() {
-                        *content = LoadState::Ready(tracks);
+                        *content = LoadState::Ready(tracks.clone());
                         home.quick_picks_provider = Some(key.provider);
                     }
                 }
@@ -151,16 +151,18 @@ impl MusicPlayer {
         let providers = providers::home_providers(self.config.default_provider);
         let mut cached_rows: Vec<HomeSection> = Vec::new();
         {
-            let Some(view) = self
+            let Some(entry) = self
+                .session
                 .panes
                 .get_mut(&pane)
                 .and_then(|pane| pane.nav_history.get_mut(idx))
             else {
                 return Task::none();
             };
-            if view.request_id != rid {
+            if entry.request_id != rid {
                 return Task::none();
             }
+            let view = std::sync::Arc::make_mut(entry);
             let ViewData {
                 kind,
                 content,
@@ -180,7 +182,7 @@ impl MusicPlayer {
                         if section.key.kind == HomeSectionKind::QuickPicks {
                             // An empty row would replace the list with a blank
                             // page; keep whatever is already there instead.
-                            if let HomeSectionData::Tracks(tracks) = &section.data {
+                            if let HomeSectionData::Tracks(tracks) = &*section.data {
                                 if !tracks.is_empty() {
                                     *content = LoadState::Ready(tracks.clone());
                                     home.quick_picks_provider = Some(provider);
@@ -189,7 +191,9 @@ impl MusicPlayer {
                         } else {
                             rows.push(section.clone());
                         }
-                        cached_rows.push(section);
+                        let mut cached = section;
+                        cached.fetched_at = now;
+                        cached_rows.push(cached);
                     }
                     home.replace_provider(provider, rows);
                     if !cached_rows.is_empty() {
@@ -206,7 +210,7 @@ impl MusicPlayer {
 
         if !cached_rows.is_empty() {
             for row in cached_rows {
-                self.home_cache.insert(row.key, row.title, row.data, now);
+                self.home_cache.insert_row(row);
             }
             self.home_cache.save();
         }
@@ -218,7 +222,7 @@ impl MusicPlayer {
     /// the queue is built from the row they came from.
     pub fn handle_play_home_track(&mut self, pane: PaneId, source: HomeTrackSource, index: usize) {
         let mut tracks: Vec<Track> = match source {
-            HomeTrackSource::Recent => self.queue.recently_played.iter().cloned().collect(),
+            HomeTrackSource::Recent => self.session.queue.recently_played.iter().cloned().collect(),
             HomeTrackSource::Downloads => self
                 .download_registry
                 .tracks()
@@ -226,7 +230,7 @@ impl MusicPlayer {
                 .cloned()
                 .collect(),
             HomeTrackSource::Section(key) => match &self.view_data_in(pane).kind {
-                ViewKind::Home(home) => match home.section(key).map(|s| &s.data) {
+                ViewKind::Home(home) => match home.section(key).map(|s| s.data.as_ref()) {
                     Some(HomeSectionData::Tracks(tracks)) => tracks.clone(),
                     _ => return,
                 },

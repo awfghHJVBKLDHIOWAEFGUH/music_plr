@@ -23,9 +23,9 @@ use crate::{
             },
         },
         update::operation::{RailKey, ScrollTarget},
-        Message, ViewKind,
+        view_data::CardMenuTarget,
+        Message,
     },
-    data::library::Card,
     i18n::{Direction, Strings},
     icons,
     theme::{self, AppTheme},
@@ -300,26 +300,40 @@ pub fn open_in_browser_button(
         .into()
 }
 
-pub fn subtitle_artist(
+pub fn subtitle_artists<'a>(
     pane: PaneId,
-    name: &str,
-    size: u32,
-    artist_target: Option<(String, crate::providers::ProviderId)>,
-) -> Element<'_, Message, AppTheme> {
-    let artist = text(name).size(size);
-    if let Some((id, source)) = artist_target {
-        link_button(artist)
-            .on_press(Message::OpenArtist {
-                pane,
-                url: source.artist_page_url(&id).unwrap_or_default(),
-                id,
-                name: name.to_string(),
-                source,
-            })
-            .into()
-    } else {
-        artist.style(fg_secondary()).into()
+    track: &'a crate::types::Track,
+    dir: Direction,
+) -> Element<'a, Message, AppTheme> {
+    if track.artists.is_empty() {
+        return Space::new().into();
     }
+    let mut children: Vec<Element<'a, Message, AppTheme>> =
+        Vec::with_capacity(track.artists.len() * 2);
+    for (index, name) in track.artists.iter().enumerate() {
+        if index > 0 {
+            children.push(
+                text(", ")
+                    .size(theme::TEXT_SIZE_SM)
+                    .style(fg_secondary())
+                    .into(),
+            );
+        }
+        let name_element = text(name).size(theme::TEXT_SIZE_SM);
+        children.push(match track.artist_target(index) {
+            Some((id, source)) => link_button(name_element)
+                .on_press(Message::OpenArtist {
+                    pane,
+                    url: source.artist_page_url(id).unwrap_or_default(),
+                    id: id.to_string(),
+                    name: name.clone(),
+                    source,
+                })
+                .into(),
+            None => name_element.style(fg_secondary()).into(),
+        });
+    }
+    dir.row(children).into()
 }
 
 pub fn labeled_input<'a>(
@@ -412,15 +426,16 @@ pub fn dep_install_status(
     op: Option<&DepOpState>,
     tr: &Strings,
 ) -> Option<Element<'static, Message, AppTheme>> {
-    if op.is_some_and(|o| o.installing) {
-        return Some(
-            match op.and_then(|o| (o.progress.1 > 0).then_some(o.progress)) {
-                Some((downloaded, total)) => dep_progress_bar(downloaded, total, tr),
-                None => text(tr.deps_installing).style(fg_secondary()).into(),
-            },
-        );
+    let op = op?;
+    if op.installing {
+        let (downloaded, total) = op.progress;
+        return Some(if total > 0 {
+            dep_progress_bar(downloaded, total, tr)
+        } else {
+            text(tr.deps_installing).style(fg_secondary()).into()
+        });
     }
-    if let Some(res) = op.and_then(|o| o.install_result.as_ref()) {
+    if let Some(res) = op.install_result.as_ref() {
         return Some(match res {
             Ok(()) => text(tr.deps_installed).style(fg_accent()).into(),
             Err(e) => text((tr.deps_failed_detail)(e.as_str()))
@@ -429,14 +444,6 @@ pub fn dep_install_status(
         });
     }
     None
-}
-
-pub fn like_button(liked: bool) -> Button<'static, Message, AppTheme> {
-    Button::new(
-        icons::icon(icons::HEART_ICON, theme::ICON_SIZE_MD).style(icon_style_playbar_button(liked)),
-    )
-    .padding(theme::SPACING_XS)
-    .style(button_style_playbar(liked))
 }
 
 pub fn dialog_button(
@@ -461,9 +468,9 @@ pub fn text_button(label: impl text::IntoFragment<'static>) -> Button<'static, M
 pub fn icon_button(
     icon_data: &'static [u8],
     size: f32,
-    color: impl Fn(&AppTheme, svg::Status) -> svg::Style + 'static,
+    style: impl Fn(&AppTheme, svg::Status) -> svg::Style + 'static,
 ) -> Button<'static, Message, AppTheme> {
-    Button::new(icons::icon(icon_data, size).style(color)).padding(theme::SPACING_2XS)
+    Button::new(icons::icon(icon_data, size).style(style)).padding(theme::SPACING_2XS)
 }
 
 pub fn icon_button_delete() -> Button<'static, Message, AppTheme> {
@@ -477,7 +484,7 @@ pub fn link_button<'a>(
     Button::new(content).padding(0).style(button_style_album())
 }
 
-pub fn playbar_toggle_button(
+pub fn playbar_toggle_button_unsized(
     icon_data: &'static [u8],
     active: bool,
 ) -> Button<'static, Message, AppTheme> {
@@ -487,8 +494,15 @@ pub fn playbar_toggle_button(
         icon_style_playbar_button(active),
     )
     .style(button_style_playbar(active))
-    .width(theme::QUEUE_BTN_WIDTH)
-    .height(theme::QUEUE_BTN_WIDTH)
+}
+
+pub fn playbar_toggle_button(
+    icon_data: &'static [u8],
+    active: bool,
+) -> Button<'static, Message, AppTheme> {
+    playbar_toggle_button_unsized(icon_data, active)
+        .width(theme::QUEUE_BTN_WIDTH)
+        .height(theme::QUEUE_BTN_WIDTH)
 }
 
 /// Width of one square art card and of its picture, shared by every card shelf
@@ -555,26 +569,20 @@ fn card_body<'a>(
 pub fn art_card<'a>(
     player: &'a super::MusicPlayer,
     pane: PaneId,
-    target: ViewKind,
+    target: CardMenuTarget,
     title: &'a str,
     subtitle: &str,
     rail: RailKey,
 ) -> Element<'a, Message, AppTheme> {
-    let card = target
-        .card_ref()
-        .expect("a card shelf only renders artist, album and playlist cards");
-    let item = Card::new(
-        target
-            .library_item()
-            .expect("a card shelf only renders artist, album and playlist cards"),
-    );
-    let is_hovered = player.drag.is_hovered_card(&item);
+    let card = target.card_ref();
+    let card_handle = target.card.clone();
+    let is_hovered = player.drag.is_hovered_card(&target.card);
     let is_dragging_this = matches!(
         player.drag.pressed,
         Some(crate::app::interaction::PressedDrag {
             what: Pressed::Card(ref c, _),
             ..
-        }) if c == &item
+        }) if c == &target.card
     );
     let hot = is_hovered || is_dragging_this;
     let thumb_path = player.thumbnail_index.get(card.provider, card.id);
@@ -590,9 +598,12 @@ pub fn art_card<'a>(
     });
     let area = MouseArea::new(body)
         .interaction(player.drag.clickable_cursor_interaction())
-        .on_press(Message::DragPress(Pressed::Card(item.clone(), Some(pane))))
-        .on_enter(Message::HoverStart(HoverTarget::Card(item.clone())))
-        .on_exit(Message::HoverEnd(HoverTarget::Card(item)));
+        .on_press(Message::DragPress(Pressed::Card(
+            card_handle.clone(),
+            Some(pane),
+        )))
+        .on_enter(Message::HoverStart(HoverTarget::Card(card_handle.clone())))
+        .on_exit(Message::HoverEnd(HoverTarget::Card(card_handle)));
     super::right_click::RightClickArea::new(
         area,
         CardTarget {

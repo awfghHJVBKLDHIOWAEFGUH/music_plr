@@ -8,7 +8,52 @@ workflow extracts the section matching the tag and prepends it to the release
 body. `generate_release_notes` stays on, so GitHub still appends the
 auto-generated compare link below it.
 
-## [Unreleased]
+## [1.5.5-tiny-skia.1] - 2026-11-09
+
+### Changed
+
+- TinySkia fork release based on GooseMusic 1.5.5. This build retains the TinySkia renderer and the fork's GitHub Releases updater while incorporating GooseMusic 1.5.5, including the InnerTube migration that replaces the Python/ytmusicapi search path.
+
+## [1.5.5] - 2026-11-09
+
+### Fixed
+
+- Long thumbnails loading for long lists on startup.
+
+## [1.5.4] - 2026-11-08
+
+### Changed
+
+- Migrated from ytmusicapi to innertube-rs.
+
+### Removed
+
+- Python and ytmusicapi dependencies.
+
+## [1.5.3] - 2026-11-07
+
+### Changed
+
+- Queue icon size increased.
+- Set build options for better size reduction.
+
+### Fixed
+
+- Removed gap in track row trailing items before the trash icon if not downloaded or cached.
+
+## [1.5.2] - 2026-11-06
+
+### Added
+
+- Support for multiple track authors.
+
+### Fixed
+
+- App crashing when dragging from queue.
+- Disabled providers are no longer shown on artist page unless provider is the source.
+- Some strings in Belarusian translation.
+
+## [1.5.1] - 2026-11-05
 
 ### Added
 
@@ -189,6 +234,26 @@ Plain lyrics are now displayed correctly when synced lyrics are not available.
 - Clearing non-main list selection on navigation.
 - Selection ordering; Ctrl+C / Ctrl+V now respect the hovered list.
 
+[1.5.5-tiny-skia.1]: https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr/compare/v1.5.1-tiny-skia.1...v1.5.5-tiny-skia.1
+[1.5.5]: https://github.com/GooseOb/music_plr/compare/v1.5.4...v1.5.5
+[1.5.4]: https://github.com/GooseOb/music_plr/compare/v1.5.3...v1.5.4
+[1.5.3]: https://github.com/GooseOb/music_plr/compare/v1.5.2...v1.5.3
+[1.5.2]: https://github.com/GooseOb/music_plr/compare/v1.5.1...v1.5.2
+[1.5.1]: https://github.com/GooseOb/music_plr/compare/v1.5.0...v1.5.1
+[1.5.0]: https://github.com/GooseOb/music_plr/compare/v1.4.1...v1.5.0
+[1.4.1]: https://github.com/GooseOb/music_plr/compare/v1.4.0...v1.4.1
+[1.4.0]: https://github.com/GooseOb/music_plr/compare/v1.3.20...v1.4.0
+[1.3.20]: https://github.com/GooseOb/music_plr/compare/v1.3.19...v1.3.20
+[1.3.19]: https://github.com/GooseOb/music_plr/compare/v1.3.18...v1.3.19
+[1.3.18]: https://github.com/GooseOb/music_plr/compare/v1.3.17...v1.3.18
+[1.3.17]: https://github.com/GooseOb/music_plr/compare/v1.3.16...v1.3.17
+[1.3.16]: https://github.com/GooseOb/music_plr/compare/v1.3.15...v1.3.16
+[1.3.15]: https://github.com/GooseOb/music_plr/compare/v1.3.14...v1.3.15
+[1.3.14]: https://github.com/GooseOb/music_plr/compare/v1.3.13...v1.3.14
+[1.3.13]: https://github.com/GooseOb/music_plr/compare/v1.3.12...v1.3.13
+[1.3.12]: https://github.com/GooseOb/music_plr/compare/v1.3.11...v1.3.12
+[1.3.11]: https://github.com/GooseOb/music_plr/compare/v1.3.10...v1.3.11
+[1.3.10]: https://github.com/GooseOb/music_plr/compare/v1.3.9...v1.3.10
 [1.3.9]: https://github.com/GooseOb/music_plr/compare/v1.3.8...v1.3.9
 [1.3.8]: https://github.com/GooseOb/music_plr/compare/v1.3.7...v1.3.8
 [1.3.7]: https://github.com/GooseOb/music_plr/compare/v1.3.6...v1.3.7

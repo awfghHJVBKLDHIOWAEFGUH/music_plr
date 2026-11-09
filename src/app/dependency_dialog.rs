@@ -2,8 +2,7 @@
 //!
 //! `MusicPlayer` opens this dialog when [`crate::deps::detect_missing`] reports
 //! something absent. The user checks which auto-installable deps to fetch
-//! (default: all) and either installs them or discards. `Python3` is listed
-//! but never auto-installable (it's an OS package), so it has no checkbox.
+//! (default: all) and either installs them or discards.
 
 use std::collections::{HashMap, HashSet};
 
@@ -35,17 +34,13 @@ pub struct DependencyDialog {
 
 impl DependencyDialog {
     pub fn new(missing: Vec<DepKind>, found: Vec<DepKind>) -> Self {
-        // Default-select every auto-installable missing dep. ytmusicapi is only
-        // selectable when Python 3 is present (otherwise its install would
-        // fail immediately). Found-on-system deps start unchecked: the user must
-        // explicitly opt to install a managed copy.
+        // Default-select every auto-installable missing dep. Found-on-system
+        // deps start unchecked: the user must explicitly opt to install a
+        // managed copy.
         let selected = missing
             .iter()
             .copied()
-            .filter(|d| {
-                d.auto_installable()
-                    && (d != &DepKind::YtMusicApi || crate::deps::availability().python3)
-            })
+            .filter(|d| d.auto_installable())
             .collect();
         Self {
             missing,
@@ -84,7 +79,5 @@ impl DependencyDialog {
 pub fn dep_desc(tr: &Strings, kind: DepKind) -> &'static str {
     match kind {
         DepKind::YtDlp => tr.deps_yt_dlp_desc,
-        DepKind::YtMusicApi => tr.deps_ytmusicapi_desc,
-        DepKind::Python3 => tr.deps_python3_desc,
     }
 }

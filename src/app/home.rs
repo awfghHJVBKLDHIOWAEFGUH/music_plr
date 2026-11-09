@@ -95,22 +95,22 @@ mod tests {
     use super::*;
     use crate::{
         data::library::LibraryKind,
-        providers::{HomeCard, HomeSectionData, HomeSectionKind},
+        providers::{CardData, HomeSectionData, HomeSectionKind},
     };
 
     fn section(provider: ProviderId, kind: HomeSectionKind) -> HomeSection {
         HomeSection::new(
             HomeSectionKey::new(provider, kind),
             String::new(),
-            HomeSectionData::Cards(vec![HomeCard {
-                kind: LibraryKind::Album,
+            HomeSectionData::Cards(vec![CardData::new(
+                LibraryKind::Album,
                 provider,
-                id: "1".to_string(),
-                title: "Album".to_string(),
-                subtitle: String::new(),
-                thumbnail: String::new(),
-                url: String::new(),
-            }]),
+                "1",
+                "Album",
+                "",
+                "",
+                "",
+            )]),
         )
     }
 

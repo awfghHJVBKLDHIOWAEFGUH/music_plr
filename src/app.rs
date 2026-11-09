@@ -34,7 +34,7 @@ pub use interaction::{CardMenuState, ContextMenuState, TrackListSearch};
 pub use lyrics_state::{LyricsState, LyricsViewMode, LyricsViewport};
 pub use message::{BackendResult, EditTrackField, Message, ServerPlaylistChange};
 pub use palette::{Palette, PaletteMode, PendingAdd};
-pub use pane::{Pane, PaneData, SplitDir, SplitNode};
+pub use pane::{Pane, SplitDir, SplitNode};
 pub use shortcut::Shortcut;
 pub use state::{
     MusicPlayer, PendingCache, PendingPlaylistWrite, PendingServerRename, ServerPlaylistUndo, Toast,

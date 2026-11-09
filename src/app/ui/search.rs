@@ -31,7 +31,7 @@ use crate::{
         update::operation::ScrollTarget,
         view_data::SearchData,
     },
-    data::library::{Card, LibraryItem, LibraryKind},
+    data::library::Card,
     icons,
     load_state::LoadState,
     providers::{CardData, ProviderId, SearchTab},
@@ -202,10 +202,8 @@ fn view_search_card_tab<'a>(
     search: &SearchData,
     tab: &'a SearchTab,
 ) -> Element<'a, Message, AppTheme> {
-    let (items, kind): (&[CardData], LibraryKind) = match tab {
-        SearchTab::Artists(items) => (items, LibraryKind::Artist),
-        SearchTab::Albums(items) => (items, LibraryKind::Album),
-        SearchTab::Playlists(items) => (items, LibraryKind::Playlist),
+    let items: &[CardData] = match tab {
+        SearchTab::Artists(items) | SearchTab::Albums(items) | SearchTab::Playlists(items) => items,
         _ => unreachable!(
             "view_search_card_tab should only be called for Artists, Albums, or Playlists tabs"
         ),
@@ -215,10 +213,10 @@ fn view_search_card_tab<'a>(
         return empty_state(player.strings.no_results_found);
     }
 
-    let cards = items.iter().enumerate().map(|(i, c)| {
-        let item = Card::new(LibraryItem::from_card_data(c, kind, search.provider));
-        card_row(player, pane, i, &c.title, &c.subtitle, &item)
-    });
+    let cards = items
+        .iter()
+        .enumerate()
+        .map(|(i, c)| card_row(player, pane, i, &c.card.title, &c.subtitle, &c.card));
 
     let mut children: Vec<Element<'_, Message, AppTheme>> = cards.collect();
     if !search.exhausted {
@@ -280,7 +278,7 @@ fn card_row<'a>(
             host: ScrollTarget::Cards(pane),
             pane,
             // The menu's "Open" lands on exactly what a click opens.
-            target: item.as_ref().into(),
+            target: crate::app::view_data::CardMenuTarget::new(item.clone()),
             rail: None,
         },
         CardTarget::into_message,

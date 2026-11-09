@@ -294,8 +294,8 @@ fn library_row<'a>(
         area,
         CardTarget {
             host: ScrollTarget::Library,
-            pane: player.focused_pane_id,
-            target: item.as_ref().into(),
+            pane: player.session.focused,
+            target: crate::app::view_data::CardMenuTarget::new(item.clone()),
             rail: None,
         },
         CardTarget::into_message,
@@ -349,7 +349,7 @@ fn nav_icon_button(
 pub(super) fn view_sidebar(player: &MusicPlayer) -> Element<'_, Message, AppTheme> {
     let p = &player.app_theme.palette;
 
-    let focused = player.focused_pane_id;
+    let focused = player.session.focused;
     let focused_pane = player.focused_pane();
     let can_back = player.can_navigate_back(focused);
     let can_forward = player.can_navigate_forward(focused);
@@ -444,7 +444,7 @@ pub(super) fn view_sidebar(player: &MusicPlayer) -> Element<'_, Message, AppThem
     };
     let library_section: Element<'_, Message, AppTheme> = if player.library.items.is_empty() {
         library_collapsed(player.strings.direction, player.strings.nothing_saved_yet)
-    } else if player.library_expanded {
+    } else if player.session.library_expanded {
         scrollable(Column::with_children(library_items).spacing(theme::SPACING_XS))
             .id(LIBRARY_LIST_ID)
             // Keep the captured offset fresh so a row's card menu anchors at
@@ -467,7 +467,7 @@ pub(super) fn view_sidebar(player: &MusicPlayer) -> Element<'_, Message, AppThem
             text(player.strings.library).into(),
             dir.trailing(
                 icons::icon(
-                    if player.library_expanded {
+                    if player.session.library_expanded {
                         dir.mirror(icons::CHEVRON_RIGHT_ICON, icons::CHEVRON_LEFT_ICON)
                     } else {
                         icons::CHEVRON_DOWN_ICON
@@ -627,6 +627,6 @@ fn sidebar_nav_item<'a>(
 
     sidebar_button(content)
         .style(button_style_panel_item(is_active))
-        .on_press(Message::NavigateTo(player.focused_pane_id, target))
+        .on_press(Message::NavigateTo(player.session.focused, target))
         .into()
 }

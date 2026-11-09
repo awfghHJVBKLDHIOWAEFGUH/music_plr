@@ -34,9 +34,15 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::{data::custom_providers::CustomProviderKind, types::Track};
+use crate::{
+    data::{
+        custom_providers::CustomProviderKind,
+        library::{Card, LegacyCardFields, LibraryItem, LibraryKind},
+    },
+    types::Track,
+};
 
 /// Drain a child pipe to completion, returning what was read. Run it on a
 /// helper thread while polling `try_wait` so a chatty child can't deadlock
@@ -262,8 +268,8 @@ fn build_offered_lists() -> OfferedLists {
         .filter(|provider| provider.enabled())
         .collect();
     let offered = |mut providers: Vec<ProviderId>| {
-        providers.extend(offered_customs.iter().copied());
         providers.retain(|provider| provider.enabled());
+        providers.extend(&offered_customs);
         providers
     };
     OfferedLists {
@@ -469,10 +475,10 @@ impl ProviderId {
         let a = crate::deps::availability();
         match self {
             ProviderId::YouTube => ProviderCaps {
-                search: a.ytmusicapi || a.yt_dlp,
+                search: true,
                 stream: a.yt_dlp,
                 download: a.yt_dlp,
-                radio: a.ytmusicapi,
+                radio: true,
             },
             ProviderId::SoundCloud => ProviderCaps {
                 // SoundCloud search is crate-based (no external tool); only
@@ -552,8 +558,8 @@ impl ProviderId {
     }
 
     /// Whether a card tab can page past its first page. Backends whose artist/
-    /// album/playlist results come from a one-shot call (`YouTube`'s ytmusicapi
-    /// helper, Bandcamp's single search page) answer later pages empty instead.
+    /// album/playlist results come from a one-shot call (`YouTube`'s `InnerTube`
+    /// search, Bandcamp's single search page) answer later pages empty instead.
     pub fn pages_cards(self) -> bool {
         matches!(
             self,
@@ -670,31 +676,73 @@ impl SearchScope {
             SearchScope::Playlists,
         ]
     }
+}
 
-    /// The `filter=` argument ytmusicapi expects for this scope (YouTube-only
-    /// mapping; other providers ignore it).
-    pub fn youtube_filter(self) -> &'static str {
-        match self {
-            SearchScope::Songs => "songs",
-            SearchScope::Videos => "videos",
-            SearchScope::Artists => "artists",
-            SearchScope::Albums => "albums",
-            SearchScope::Playlists => "playlists",
+/// Provider-agnostic card result (artist/album/playlist drill-down). The
+/// [`Card`] is the identity; `subtitle` is the only display-only extra.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct CardData {
+    pub card: Card,
+    pub subtitle: String,
+}
+
+impl<'de> Deserialize<'de> for CardData {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Default, Deserialize)]
+        #[serde(default)]
+        struct CardDataCompat {
+            card: Option<Card>,
+            subtitle: String,
+            #[serde(flatten)]
+            legacy: LegacyCardFields,
         }
+
+        let compat = CardDataCompat::deserialize(deserializer)?;
+        Ok(match compat.card {
+            Some(card) => Self {
+                card,
+                subtitle: compat.subtitle,
+            },
+            // v1.5.4 stored flat cards without an identity; the session
+            // migration fills the kind and provider from the owning view.
+            None => Self::new(
+                LibraryKind::Album,
+                ProviderId::default(),
+                compat.legacy.id,
+                compat.legacy.title,
+                compat.subtitle,
+                compat.legacy.thumbnail,
+                compat.legacy.url,
+            ),
+        })
     }
 }
 
-/// Provider-agnostic card result (artist/album/playlist drill-down). `url` is
-/// the public page the provider advertised for the card, empty when it exposes
-/// none (the card is then not offered "Open in browser").
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct CardData {
-    pub id: String,
-    pub title: String,
-    pub subtitle: String,
-    pub thumbnail: String,
-    pub url: String,
+impl CardData {
+    pub fn new(
+        kind: LibraryKind,
+        provider: ProviderId,
+        id: impl Into<String>,
+        title: impl Into<String>,
+        subtitle: impl Into<String>,
+        thumbnail: impl Into<String>,
+        url: impl Into<String>,
+    ) -> Self {
+        Self {
+            card: Card::new(LibraryItem {
+                kind,
+                provider,
+                id: id.into(),
+                title: title.into(),
+                thumbnail: thumbnail.into(),
+                url: url.into(),
+            }),
+            subtitle: subtitle.into(),
+        }
+    }
 }
 
 /// Provider-agnostic search result: the playable tracks plus the active tab
@@ -711,9 +759,8 @@ pub enum SearchTab {
     Playlists(Vec<CardData>),
 }
 
-impl SearchTab {
-    /// The tab for a search scope when no results have arrived yet.
-    pub fn from_scope(scope: SearchScope) -> Self {
+impl From<SearchScope> for SearchTab {
+    fn from(scope: SearchScope) -> Self {
         match scope {
             SearchScope::Songs => SearchTab::Songs,
             SearchScope::Videos => SearchTab::Videos,
@@ -722,10 +769,11 @@ impl SearchTab {
             SearchScope::Playlists => SearchTab::Playlists(Vec::new()),
         }
     }
+}
 
-    /// The search scope represented by this tab (inverse of [`from_scope`]).
-    pub fn scope(&self) -> SearchScope {
-        match self {
+impl From<&SearchTab> for SearchScope {
+    fn from(tab: &SearchTab) -> Self {
+        match tab {
             SearchTab::Songs => SearchScope::Songs,
             SearchTab::Videos => SearchScope::Videos,
             SearchTab::Artists(_) => SearchScope::Artists,
@@ -733,7 +781,9 @@ impl SearchTab {
             SearchTab::Playlists(_) => SearchScope::Playlists,
         }
     }
+}
 
+impl SearchTab {
     /// Whether this tab shows the playable track list (vs. card results).
     pub fn is_track_tab(&self) -> bool {
         matches!(self, SearchTab::Songs | SearchTab::Videos)
@@ -806,8 +856,8 @@ pub fn search(
 /// Bandcamp/Last.fm re-run their paged track search), while a card tab is just
 /// the next page of the same scope: every provider that offers artist/album/
 /// playlist results already takes an offset there. `YouTube`'s card tabs come
-/// from ytmusicapi, which serves one page only, so it answers with an empty
-/// page and the tab is marked exhausted.
+/// from a one-shot `InnerTube` search, so it answers with an empty page and the
+/// tab is marked exhausted.
 pub fn search_more(
     provider: ProviderId,
     query: &str,
@@ -816,9 +866,7 @@ pub fn search_more(
 ) -> Result<(Vec<Track>, SearchTab)> {
     if !matches!(scope, SearchScope::Songs | SearchScope::Videos) {
         return match provider {
-            ProviderId::YouTube | ProviderId::Local => {
-                Ok((Vec::new(), SearchTab::from_scope(scope)))
-            }
+            ProviderId::YouTube | ProviderId::Local => Ok((Vec::new(), scope.into())),
             _ => search(provider, query, scope, offset),
         };
     }
@@ -833,7 +881,7 @@ pub fn search_more(
         }
         ProviderId::Local => Vec::new(),
     };
-    Ok((tracks, SearchTab::from_scope(scope)))
+    Ok((tracks, scope.into()))
 }
 
 /// Drill down into a card (artist/album/playlist) for `provider`. Returns the
@@ -855,7 +903,6 @@ pub struct ServerPlaylist {
     pub id: String,
     pub name: String,
     pub track_count: usize,
-    /// The playlist's cover-art URL, empty when the server has none.
     pub thumbnail: String,
 }
 
@@ -983,20 +1030,20 @@ pub fn delete_playlist(provider: ProviderId, playlist_id: &str) -> Result<()> {
 }
 
 pub use artist_page::{
-    ArtistAlbumCard, ArtistDataKind, ArtistHeader, ArtistKindData, ArtistPage, ArtistPageState,
-    ArtistSection, ArtistSectionKind, RelatedArtistCard, SectionContent,
+    ArtistAlbumCard, ArtistDataKind, ArtistHeader, ArtistPage, ArtistPageState, ArtistSection,
+    ArtistSectionKind, RelatedArtistCard, SectionContent,
 };
 pub use error::{ErrorKind, ProviderError};
 pub use home::{
-    fetch_home, home_providers, sort_sections, HomeCard, HomeSection, HomeSectionData,
-    HomeSectionKey, HomeSectionKind,
+    fetch_home, home_providers, sort_sections, HomeSection, HomeSectionData, HomeSectionKey,
+    HomeSectionKind,
 };
 
 /// One artist-page section fetch result: the kind and its data (or error).
 /// See [`spawn_artist_kinds_fetch`].
 pub struct ArtistKindResult(
     pub ArtistDataKind,
-    pub Result<ArtistKindData, ProviderError>,
+    pub Result<SectionContent, ProviderError>,
 );
 
 /// Fetch each requested kind of `provider`'s artist page on a background
@@ -1018,9 +1065,10 @@ pub fn spawn_artist_kinds_fetch(
         } else {
             // One-shot providers: a single request answers every kind; split
             // it into per-kind payloads and send them all at once. When
-            // YouTube's popular tracks still lack durations/view counts, a
-            // yt-dlp enrichment pass runs AFTER the fan-out (it takes
-            // seconds) and resends Popular so the page never waits on it.
+            // YouTube's popular tracks still lack durations/view counts (e.g.
+            // the fallback top-songs rows), a yt-dlp enrichment pass runs AFTER
+            // the fan-out (it takes seconds) and resends Popular so the page
+            // never waits on it.
             let result = match provider {
                 ProviderId::YouTube => youtube::fetch_artist_page(&id, kinds),
                 ProviderId::MusicBrainz => musicbrainz::fetch_artist_page(&id, kinds),
@@ -1056,7 +1104,7 @@ pub fn spawn_artist_kinds_fetch(
                         youtube::enrich_track_metadata(&mut page.popular);
                         let _ = tx.send(ArtistKindResult(
                             ArtistDataKind::Popular,
-                            Ok(ArtistKindData::Popular(page.popular)),
+                            Ok(SectionContent::Tracks(page.popular)),
                         ));
                     }
                 }
@@ -1069,14 +1117,17 @@ pub fn spawn_artist_kinds_fetch(
 /// Project `page` down to just `kind`'s data. `None` means the page has no
 /// data for that kind (e.g. no header) — the kind is skipped rather than
 /// cached as covered with empty content.
-fn single_kind_data(page: &ArtistPage, kind: ArtistDataKind) -> Option<ArtistKindData> {
-    use artist_page::ArtistKindData as D;
+fn single_kind_data(page: &ArtistPage, kind: ArtistDataKind) -> Option<SectionContent> {
+    use artist_page::SectionContent as C;
     match kind {
-        ArtistDataKind::Header => page.header.clone().map(D::Header),
-        ArtistDataKind::Popular => Some(D::Popular(page.popular.clone())),
-        ArtistDataKind::Albums => Some(D::Albums(page.albums.clone())),
-        ArtistDataKind::Playlists => Some(D::Playlists(page.playlists.clone())),
-        ArtistDataKind::Related => Some(D::Related(page.related.clone())),
+        ArtistDataKind::Header => page
+            .header
+            .clone()
+            .map(|header| C::Header(Box::new(header))),
+        ArtistDataKind::Popular => Some(C::Tracks(page.popular.clone())),
+        ArtistDataKind::Albums => Some(C::Albums(page.albums.clone())),
+        ArtistDataKind::Playlists => Some(C::Playlists(page.playlists.clone())),
+        ArtistDataKind::Related => Some(C::Related(page.related.clone())),
     }
 }
 
@@ -1196,7 +1247,14 @@ pub struct ProviderTrack {
     /// provider this is the on-disk path of the imported/downloaded audio
     /// file (a local file has no remote URL).
     pub url: String,
-    pub artist_id: Option<String>,
+    /// Provider artist ids, index-aligned with the artists they identify. An
+    /// empty entry is an artist this provider cannot identify.
+    #[serde(
+        default,
+        alias = "artist_id",
+        deserialize_with = "crate::util::deserialize_string_list"
+    )]
+    pub artist_ids: Vec<String>,
     pub duration: u32,
     pub thumbnail: String,
     pub album: Option<crate::types::TrackAlbum>,
@@ -1258,11 +1316,7 @@ mod tests {
     }
 
     fn card(id: &str) -> CardData {
-        CardData {
-            id: id.into(),
-            title: id.into(),
-            ..Default::default()
-        }
+        CardData::new(LibraryKind::Artist, ProviderId::YouTube, id, id, "", "", "")
     }
 
     #[test]
@@ -1293,13 +1347,13 @@ mod tests {
             assert!(!p.pages_cards(), "{p:?}");
         }
 
-        // YouTube's card tabs come from a one-shot ytmusicapi call, so asking
+        // YouTube's card tabs come from a one-shot InnerTube search, so asking
         // for another page answers empty (which terminates the paging) without
         // reaching yt-dlp.
         let (tracks, tab) =
             search_more(ProviderId::YouTube, "night drive", SearchScope::Artists, 10).unwrap();
         assert!(tracks.is_empty());
         assert_eq!(tab.card_count(), Some(0));
-        assert_eq!(tab.scope(), SearchScope::Artists);
+        assert_eq!(SearchScope::from(&tab), SearchScope::Artists);
     }
 }

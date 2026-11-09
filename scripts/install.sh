@@ -2,7 +2,7 @@
 # install.sh — one-command installer for Goosemusic.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/awfghHJVBKLDHIOWAEFGUH/music_plr/release-prep/tiny-skia-v1.5.1/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/awfghHJVBKLDHIOWAEFGUH/music_plr/release-prep/tiny-skia-v1.5.5/scripts/install.sh | bash
 #
 # Installs to:
 #   Linux:   ~/.local/bin/goosemusic  + desktop integration files

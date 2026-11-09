@@ -562,12 +562,17 @@ mod tests {
     fn version_gt_orders_fork_release_tags() {
         assert!(version_gt("v1.5.2-tiny-skia.1", "v1.5.1-tiny-skia.1"));
         assert!(version_gt("v1.5.1-tiny-skia.2", "v1.5.1-tiny-skia.1"));
+        assert!(version_gt("v1.5.5-tiny-skia.1", "v1.5.1-tiny-skia.1"));
+        assert!(version_gt("v1.5.5-tiny-skia.2", "v1.5.5-tiny-skia.1"));
         assert!(version_gt("1.3.6", "1.3.5"));
-        // A branch build at 1.5.1 should see the first tagged fork release.
+        // A branch build at 1.5.5 should see the first tagged v1.5.5 fork release.
         assert!(version_gt("v1.5.1-tiny-skia.1", "1.5.1"));
+        assert!(version_gt("v1.5.5-tiny-skia.1", "1.5.5"));
         assert_eq!(parse_release_key("v1.5.1-tiny-skia.1"), Some((1, 5, 1, 1)));
+        assert_eq!(parse_release_key("v1.5.5-tiny-skia.1"), Some((1, 5, 5, 1)));
         assert_eq!(parse_release_key("v1.5.1"), Some((1, 5, 1, 0)));
         assert!(!version_gt("v1.5.1-tiny-skia.1", "v1.5.1-tiny-skia.1"));
+        assert!(!version_gt("v1.5.5-tiny-skia.1", "v1.5.5-tiny-skia.1"));
         assert!(!is_update_available(APP_RELEASE_TAG));
         assert!(!version_gt("1.3.4", "1.3.5"));
     }
@@ -581,9 +586,9 @@ mod tests {
 
     #[test]
     fn github_release_response_parses_tag() {
-        let body = r#"{"tag_name":"v1.5.1-tiny-skia.1","draft":false,"prerelease":false}"#;
+        let body = r#"{"tag_name":"v1.5.5-tiny-skia.1","draft":false,"prerelease":false}"#;
         let parsed: GitHubReleaseResponse = serde_json::from_str(body).unwrap();
-        assert_eq!(parsed.tag_name, "v1.5.1-tiny-skia.1");
+        assert_eq!(parsed.tag_name, "v1.5.5-tiny-skia.1");
         assert!(!parsed.draft);
         assert!(!parsed.prerelease);
     }
@@ -617,13 +622,13 @@ mod tests {
 
     #[test]
     fn constructed_urls_follow_fork_release_layout() {
-        let asset_url = constructed_asset_url("v1.5.1-tiny-skia.1");
+        let asset_url = constructed_asset_url("v1.5.5-tiny-skia.1");
         assert_eq!(asset_url, format!(
-            "https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr/releases/download/v1.5.1-tiny-skia.1/{}",
+            "https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr/releases/download/v1.5.5-tiny-skia.1/{}",
             asset_name()
         ));
-        assert_eq!(release_url("v1.5.1-tiny-skia.1"),
-            "https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr/releases/tag/v1.5.1-tiny-skia.1");
+        assert_eq!(release_url("v1.5.5-tiny-skia.1"),
+            "https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr/releases/tag/v1.5.5-tiny-skia.1");
     }
 
     #[test]

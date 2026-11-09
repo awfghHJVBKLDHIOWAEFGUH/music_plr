@@ -13,12 +13,7 @@ use super::{
     view_track_list, Message, MusicPlayer,
 };
 use crate::{
-    app::{
-        pane::PaneId,
-        update::operation::RailKey,
-        view_data::{AlbumRef, PlaylistRef},
-        ViewKind,
-    },
+    app::{pane::PaneId, update::operation::RailKey, view_data::CardMenuTarget, ViewKind},
     load_state::LoadState,
     providers::{ArtistSection, ArtistSectionKind, ProviderId, SectionContent},
     theme::{self, AppTheme},
@@ -59,7 +54,13 @@ pub(super) fn view_artist<'a>(
         ArtistSectionKind::Related,
     ] {
         let section = entry.page.section(kind);
-        children.push(section_header(pane, kind, section.provider, player.strings));
+        children.push(section_header(
+            pane,
+            kind,
+            section.provider,
+            entry.source,
+            player.strings,
+        ));
         children.push(section_body(player, pane, section, kind));
     }
 
@@ -205,11 +206,12 @@ fn section_header(
     pane: PaneId,
     kind: ArtistSectionKind,
     selected: Option<ProviderId>,
+    source: ProviderId,
     tr: &'static crate::i18n::Strings,
 ) -> Element<'static, Message, AppTheme> {
     let picker = scope_tab_row(
         tr.direction,
-        kind.providers().iter().map(|&provider| {
+        kind.providers(source).iter().map(|&provider| {
             (
                 tr.provider(provider),
                 selected == Some(provider),
@@ -243,7 +245,6 @@ fn section_header(
 fn cards<'a>(
     player: &'a MusicPlayer,
     pane: PaneId,
-    provider: ProviderId,
     content: &'a SectionContent,
     row: ArtistSectionKind,
 ) -> Vec<Element<'a, Message, AppTheme>> {
@@ -253,20 +254,11 @@ fn cards<'a>(
             .map(|c| {
                 let subtitle: std::borrow::Cow<'_, str> =
                     super::search::browse_meta(&c.badge, &c.date);
-                let target = ViewKind::Album(AlbumRef {
-                    id: c.id.clone(),
-                    name: c.title.clone(),
-                    badge: c.badge.clone(),
-                    date: c.date.clone(),
-                    thumbnail: c.thumbnail.clone(),
-                    provider,
-                    url: c.url.clone(),
-                });
                 art_card(
                     player,
                     pane,
-                    target,
-                    &c.title,
+                    CardMenuTarget::album(c.card.clone(), &c.badge, &c.date),
+                    &c.card.title,
                     &subtitle,
                     RailKey::Artist(row),
                 )
@@ -275,31 +267,30 @@ fn cards<'a>(
         SectionContent::Playlists(v) => v
             .iter()
             .map(|c| {
-                let target = ViewKind::PlaylistView(PlaylistRef {
-                    id: c.id.clone(),
-                    name: c.title.clone(),
-                    thumbnail: c.thumbnail.clone(),
-                    provider,
-                    url: c.url.clone(),
-                });
-                art_card(player, pane, target, &c.title, "", RailKey::Artist(row))
+                art_card(
+                    player,
+                    pane,
+                    CardMenuTarget::new(c.card.clone()),
+                    &c.card.title,
+                    "",
+                    RailKey::Artist(row),
+                )
             })
             .collect(),
         SectionContent::Related(v) => v
             .iter()
             .map(|r| {
-                let target = ViewKind::Artist(crate::app::view_data::ArtistEntry {
-                    id: r.id.clone(),
-                    name: r.name.clone(),
-                    source: provider,
-                    url: r.url.clone(),
-                    thumbnail: r.thumbnail.clone(),
-                    page: Box::new(crate::providers::ArtistPageState::new(provider, &r.id)),
-                });
-                art_card(player, pane, target, &r.name, &r.stat, RailKey::Artist(row))
+                art_card(
+                    player,
+                    pane,
+                    CardMenuTarget::new(r.card.clone()),
+                    &r.card.title,
+                    &r.stat,
+                    RailKey::Artist(row),
+                )
             })
             .collect(),
-        SectionContent::Tracks(_) => Vec::new(),
+        SectionContent::Tracks(_) | SectionContent::Header(_) => Vec::new(),
     }
 }
 
@@ -365,9 +356,8 @@ fn section_body<'a>(
             return loading_state(player.strings.loading);
         }
     };
-    let provider = section.provider.unwrap_or_default();
     h_scroll_cards(
-        cards(player, pane, provider, content, kind),
+        cards(player, pane, content, kind),
         player.strings,
         pane,
         kind,

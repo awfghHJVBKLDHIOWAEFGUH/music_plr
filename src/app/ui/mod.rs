@@ -89,9 +89,9 @@ pub const CONTEXT_MENU_ROW_ID: Id = Id::new("context_menu_row");
 pub fn view(player: &MusicPlayer) -> Element<'_, Message, AppTheme> {
     let mut body = vec![
         sidebar::view_sidebar(player),
-        split::view_split_tree(player, &player.split_root),
+        split::view_split_tree(player, &player.session.root),
     ];
-    if player.show_queue {
+    if player.session.show_queue {
         body.push(queue::view_queue_panel(player));
     }
 

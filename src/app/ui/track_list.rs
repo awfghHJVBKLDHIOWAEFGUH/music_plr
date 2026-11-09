@@ -16,7 +16,7 @@ pub fn track_list_id(pane: PaneId) -> Id {
 use super::{
     right_click::RightClickArea,
     shared_components::{
-        empty_state, inner_row_layout, play_pause_button, subtitle_artist, thumbnail, track_row,
+        empty_state, inner_row_layout, play_pause_button, subtitle_artists, thumbnail, track_row,
     },
     styles::{
         button_style_album, button_style_primary, fg_secondary, icon_style_accent,
@@ -28,8 +28,8 @@ use crate::{
     app::{
         interaction::{row_id, HoverTarget, Pressed, TrackPos},
         pane::{is_main_pane, PaneId},
-        ui::shared_components::like_button,
-        update::operation::{ListGeometry, ScrollTarget},
+        ui::shared_components::playbar_toggle_button_unsized,
+        update::operation::ScrollTarget,
         ViewData,
     },
     icons,
@@ -72,42 +72,23 @@ where
     F: Fn(usize) -> Element<'a, Message, AppTheme>,
 {
     let row_h = theme::ROW_HEIGHT;
-    let children: Vec<Element<'a, Message, AppTheme>> = match player.bounds.list_geo(pane) {
-        Some(ListGeometry {
-            translation_y,
-            bounds,
-            ..
-        }) if count > 0 && count as f32 * row_h > bounds.height + 1.0 => {
-            // The scrollable clamps its own offset to the content's height, so
-            // a capture taken before the list shrank can point past the last
-            // row. Clamp it too, or the window would start after the content.
-            let translation_y = translation_y.min((count as f32 * row_h - bounds.height).max(0.0));
-            let viewport_height = bounds.height;
-            let overscan = 6i32;
+    let overscan = 6usize;
+    let geo = player.bounds.list_geo(pane);
+    // A list's first frame has no capture yet.
+    let viewport_height = geo.map_or(player.window_size.height, |g| g.bounds.height);
+    let translation_y = geo.map_or(0.0, |g| g.translation_y);
+    let (first, end) = visible_range(count, row_h, translation_y, viewport_height, overscan);
 
-            let first =
-                ((((translation_y / row_h) - overscan as f32).max(0.0)) as usize).min(count);
-            let visible = ((viewport_height / row_h).ceil() as usize) + (overscan as usize) * 2;
-            let end = (first + visible).min(count);
-
-            let mut items = Vec::with_capacity((end - first) + 2);
-            if first > 0 {
-                items.push(row_spacer(first as f32 * row_h));
-            }
-            for i in first..end {
-                items.push(render_row(i));
-            }
-            if end < count {
-                items.push(row_spacer((count - end) as f32 * row_h));
-            }
-            items
-        }
-        // Bounds known and the list fits within the viewport, or no capture has
-        // seen this list yet: render every row. The captured geometry only ever
-        // narrows the window; a missing capture must never read as an empty
-        // list (the update loop refreshes it once the list's shape changes).
-        _ => (0..count).map(render_row).collect(),
-    };
+    let mut children = Vec::with_capacity((end - first) + 2);
+    if first > 0 {
+        children.push(row_spacer(first as f32 * row_h));
+    }
+    for i in first..end {
+        children.push(render_row(i));
+    }
+    if end < count {
+        children.push(row_spacer((count - end) as f32 * row_h));
+    }
 
     let id = track_list_id(pane);
     scrollable(Column::with_children(children))
@@ -115,6 +96,23 @@ where
         .height(Length::Fill)
         .on_scroll(move |vp| super::scrolled(ScrollTarget::Tracks(pane), vp.absolute_offset()))
         .into()
+}
+
+/// Half-open range of rows a virtualized list draws for a viewport. The
+/// scrollable clamps its own offset to the content's height, so a capture taken
+/// before the list shrank can point past the last row; clamp it here too, or
+/// the window would start after the content.
+fn visible_range(
+    count: usize,
+    row_h: f32,
+    translation_y: f32,
+    viewport_height: f32,
+    overscan: usize,
+) -> (usize, usize) {
+    let translation_y = translation_y.min((count as f32 * row_h - viewport_height).max(0.0));
+    let first = ((((translation_y / row_h) - overscan as f32).max(0.0)) as usize).min(count);
+    let visible = ((viewport_height / row_h).ceil() as usize) + overscan * 2;
+    (first, (first + visible).min(count))
 }
 
 pub(super) fn row_spacer<'a>(height: f32) -> Element<'a, Message, AppTheme> {
@@ -128,6 +126,7 @@ pub(super) fn leading_control<'a>(
     trashed: bool,
 ) -> Element<'a, Message, AppTheme> {
     let is_current = player
+        .session
         .queue
         .current()
         .is_some_and(|t| t.same_identity(track));
@@ -175,6 +174,7 @@ fn view_track_row_inner<'a>(
     let is_hovered = player.drag.hovered_track() == Some(pos);
     let is_dragging = player.is_dragging_track(pos);
     let is_current = player
+        .session
         .queue
         .current()
         .is_some_and(|t| t.same_identity(track));
@@ -231,6 +231,11 @@ fn view_track_row_inner<'a>(
 }
 
 // ── shared helpers ─────────────────────────────────────────────
+fn trailing_icon(icon: &'static [u8]) -> Element<'static, Message, AppTheme> {
+    icons::icon(icon, theme::ICON_SIZE_MD)
+        .style(icon_style_accent())
+        .into()
+}
 
 /// The inner row layout for a track: leading | thumbnail | title/artist |
 /// status icon | duration. Delegates to [`inner_row_layout`].
@@ -259,7 +264,7 @@ fn track_row_layout_inner<'a>(
     let pane = if is_main_pane(pos.pane) {
         pos.pane
     } else {
-        player.focused_pane_id
+        player.session.focused
     };
     let thumb = player.thumbnail_index.get(track.source, track.primary_id());
     let is_downloaded = player.download_registry.contains(&track.cache_key());
@@ -306,28 +311,21 @@ fn track_row_layout_inner<'a>(
     }
 
     if trashed {
-        trailing_children.push(
-            icons::icon(icons::DELETE_ICON, theme::ICON_SIZE_MD)
-                .style(icon_style_accent())
-                .into(),
-        );
+        trailing_children.push(trailing_icon(icons::DELETE_ICON));
     }
 
-    trailing_children.push(if is_downloaded {
-        icons::icon(icons::DOWNLOAD_ICON, theme::ICON_SIZE_MD)
-            .style(icon_style_accent())
-            .into()
-    } else if is_cached {
-        icons::icon(icons::CACHE_ICON, theme::ICON_SIZE_MD)
-            .style(icon_style_accent())
-            .into()
-    } else {
-        Space::new().width(theme::ICON_SIZE_MD).into()
-    });
+    let icon = is_downloaded
+        .then_some(icons::DOWNLOAD_ICON)
+        .or_else(|| is_cached.then_some(icons::CACHE_ICON));
+
+    if let Some(icon) = icon {
+        trailing_children.push(trailing_icon(icon));
+    }
 
     let liked = player.is_track_liked(track);
     trailing_children.push(
-        like_button(liked)
+        playbar_toggle_button_unsized(icons::HEART_ICON, liked)
+            .padding(theme::SPACING_XS)
             .on_press(Message::ToggleTrackLike(pos))
             .into(),
     );
@@ -349,13 +347,7 @@ fn track_row_layout_inner<'a>(
         .into(),
     );
 
-    let artist_id = track.provider_artist_id(track.source);
-    let artist_subtitle = subtitle_artist(
-        pane,
-        &track.artist,
-        theme::TEXT_SIZE_SM,
-        artist_id.map(|id| (id.to_string(), track.source)),
-    );
+    let artist_subtitle = subtitle_artists(pane, track, player.strings.direction);
 
     inner_row_layout(
         player.strings.direction,
@@ -374,4 +366,38 @@ fn track_row_layout_inner<'a>(
         bottom: theme::SPACING_XS,
         left: theme::SPACING_SM,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::visible_range;
+
+    const ROW: f32 = 48.0;
+
+    #[test]
+    fn an_uncaptured_list_renders_only_a_screenful() {
+        let (first, end) = visible_range(10_000, ROW, 0.0, 768.0, 6);
+        assert_eq!(first, 0);
+        assert_eq!(end, (768.0f32 / ROW).ceil() as usize + 12);
+        assert!(end < 10_000);
+    }
+
+    #[test]
+    fn a_captured_window_follows_the_scroll_offset() {
+        let (first, end) = visible_range(1_000, ROW, 100.0 * ROW, 480.0, 2);
+        assert_eq!(first, 98);
+        assert_eq!(end, 98 + 10 + 4);
+    }
+
+    #[test]
+    fn a_short_list_renders_entirely() {
+        assert_eq!(visible_range(5, ROW, 0.0, 480.0, 6), (0, 5));
+    }
+
+    #[test]
+    fn a_stale_offset_clamps_to_the_last_screen() {
+        let (first, end) = visible_range(100, ROW, f32::MAX, 480.0, 2);
+        assert_eq!(first, 88);
+        assert_eq!(end, 100);
+    }
 }

@@ -17,17 +17,35 @@ pub struct ServerPlaylistId {
     pub id: String,
 }
 
+/// A [`ServerPlaylist`] tagged with the provider that owns it. Flattened so
+/// `server_playlists.json` keys stay `provider`/`id`/`name`/`thumbnail`/
+/// `track_count`, exactly as before.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerPlaylistEntry {
     pub provider: ProviderId,
-    pub id: String,
-    pub name: String,
-    #[serde(default)]
-    pub thumbnail: String,
-    pub track_count: usize,
+    #[serde(flatten)]
+    pub playlist: ServerPlaylist,
+}
+
+impl std::ops::Deref for ServerPlaylistEntry {
+    type Target = ServerPlaylist;
+
+    fn deref(&self) -> &Self::Target {
+        &self.playlist
+    }
+}
+
+impl std::ops::DerefMut for ServerPlaylistEntry {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.playlist
+    }
 }
 
 impl ServerPlaylistEntry {
+    pub fn new(provider: ProviderId, playlist: ServerPlaylist) -> Self {
+        Self { provider, playlist }
+    }
+
     pub fn target(&self) -> ServerPlaylistId {
         ServerPlaylistId {
             provider: self.provider,
@@ -75,13 +93,7 @@ impl ServerPlaylistStore {
     pub fn replace_provider(&mut self, provider: ProviderId, playlists: &[ServerPlaylist]) -> bool {
         let fresh: Vec<ServerPlaylistEntry> = playlists
             .iter()
-            .map(|playlist| ServerPlaylistEntry {
-                provider,
-                id: playlist.id.clone(),
-                name: playlist.name.clone(),
-                thumbnail: playlist.thumbnail.clone(),
-                track_count: playlist.track_count,
-            })
+            .map(|playlist| ServerPlaylistEntry::new(provider, playlist.clone()))
             .collect();
         let existing: Vec<ServerPlaylistEntry> = self.for_provider(provider).cloned().collect();
         if existing == fresh {
@@ -133,15 +145,6 @@ impl ServerPlaylistStore {
                 self.save();
             }
         }
-    }
-
-    /// Put a row back exactly where it was, for a rolled-back write.
-    pub fn restore(&mut self, entry: ServerPlaylistEntry) {
-        match self.get_mut(&entry.target()) {
-            Some(existing) => *existing = entry,
-            None => self.entries.push(entry),
-        }
-        self.save();
     }
 
     /// Shift a row's cached track count by `delta`, so the sidebar agrees with
@@ -253,20 +256,8 @@ mod tests {
         let provider = target("any").provider;
         let mut store = ServerPlaylistStore {
             entries: vec![
-                ServerPlaylistEntry {
-                    provider,
-                    id: "a".into(),
-                    name: "A".into(),
-                    thumbnail: String::new(),
-                    track_count: 1,
-                },
-                ServerPlaylistEntry {
-                    provider,
-                    id: "a".into(),
-                    name: "A again".into(),
-                    thumbnail: String::new(),
-                    track_count: 1,
-                },
+                ServerPlaylistEntry::new(provider, playlist("a", "A", 1)),
+                ServerPlaylistEntry::new(provider, playlist("a", "A again", 1)),
             ],
         };
         store.after_load();

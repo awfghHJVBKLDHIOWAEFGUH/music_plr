@@ -5,46 +5,42 @@
 A YouTube/SoundCloud/Bandcamp search music player with local playback, downloads, and OS media controls, built with [iced](https://iced.rs).
 
 
-## v1.5.1 TinySkia fork
+## TinySkia fork (v1.5.5-tiny-skia.1)
 
-This branch is a focused renderer/dependency configuration experiment based on the official **GooseMusic v1.5.1** source tag. It keeps the existing application and its audio, provider, media-control, and UI code intact while enabling Iced's TinySkia renderer feature and dropping the app's explicit Iced `wgpu` feature.
+This is the fork's TinySkia renderer build, based on the official **GooseMusic v1.5.5** source tag. It keeps the application's audio, provider, media-control, and UI code intact while enabling Iced's TinySkia renderer and dropping the app's explicit Iced `wgpu` feature. The fork's GitHub Releases updater and cross-platform packaging are retained.
 
 ### What changed
 
-- **Base:** GooseMusic `v1.5.1`, based on upstream commit `e1d27d8e`.
+- **Base:** GooseMusic `v1.5.5`.
 - **Iced:** `0.14`.
 - **TinySkia renderer crates resolved:** `iced_tiny_skia 0.14.1` and `tiny-skia 0.11.4`.
 - **Cargo feature change:** removed the single explicit `wgpu` feature from the `iced` dependency; retained `tiny-skia` and the other 10 features: `image`, `svg`, `tokio`, `canvas`, `advanced`, `crisp`, `web-colors`, `thread-pool`, `x11`, and `wayland`.
-- **Files changed for the migration:** `Cargo.toml` and `Cargo.lock`; no application UI or audio source files were changed in the migration commit.
-- **Lockfile diff:** 14 insertions and 332 deletions (346 changed lines).
-
-The feature change is specifically the removal of the app's explicit Iced `wgpu` feature. The committed lockfile still contains WGPU-related package records, so this README does not claim that every WGPU-named crate has been eliminated from dependency resolution.
+- **Upstream integration:** the source matches GooseMusic v1.5.5 apart from the renderer/dependency configuration, the fork updater, release packaging, and documentation. This includes the InnerTube migration that replaces the Python/`ytmusicapi` search path, multi-author tracks, and the v1.5.2–v1.5.5 fixes.
+- **Fork release pipeline:** publishes Linux/macOS/Windows assets with SHA-256 sidecars, macOS DMGs, and a Windows Inno Setup installer, and creates draft GitHub Releases.
+- **Lockfile:** WGPU-only package records were dropped when the renderer feature changed; a few inactive WGPU-named records remain in the committed lockfile. No WGPU crate is in the active dependency graph or the release binary.
 
 ### Build and runtime validation
 
-- Optimized release build completed successfully.
-- Recorded release-build time: **2 minutes 30 seconds** on the local test machine.
-- Runtime checks passed for **audio playback, album artwork, mosaic rendering, and SVG rendering**.
-- Validation environment: **CachyOS / Wayland / Hyprland**, Intel Core **i5-12400T**, Intel UHD Graphics **730**, and **16 GB RAM**.
-
-These are local validation results, not a cross-platform test matrix. No controlled v1.5.1 performance benchmark was recorded, so no FPS, memory, or speed improvement is claimed here.
-
-### Known limitation
-
-Very long track titles can occasionally crowd/overlap adjacent rows in the upright track list. This is a minor presentation issue; the attempted layout adjustment was not included in the migration commit.
+- `cargo metadata --locked --no-deps`, `cargo check --locked`, and the fork updater tests pass on the migration branch.
+- An optimized release build (`cargo build --release --locked`) completed successfully on Linux x86_64 with LTO, `codegen-units = 1`, `panic = "abort"`, and stripping enabled. The resulting binary contains no WGPU components.
+- Runtime checks from the original v1.5.1 experiment passed for audio playback, album artwork, mosaic rendering, and SVG rendering. This remains a local validation result, not a cross-platform test matrix; no FPS, memory, or speed improvement is claimed.
 
 ### Branch and commit
 
-- Branch: `tiny-skia-v1.5.1`
-- Migration commit: [`614e954`](https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr/commit/614e9543932a94b0ff5a1498bd219fb095c2604e)
+- Branch: `release-prep/tiny-skia-v1.5.5`
 - Fork: [awfghHJVBKLDHIOWAEFGUH/music_plr](https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr)
+- Previous release: `v1.5.1-tiny-skia.1` on `release-prep/tiny-skia-v1.5.1`
 
-This is a focused fork branch for testing the TinySkia configuration; it does not replace the upstream project's release or installation instructions.
+### History
+
+The fork began as a v1.5.1 renderer/dependency experiment (migration commit [`614e954`](https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr/commit/614e9543932a94b0ff5a1498bd219fb095c2604e)). That experiment changed only `Cargo.toml` and `Cargo.lock`, recorded a 2 minute 30 second release build on a CachyOS/Wayland test machine, and noted a long-track-title layout limitation that was not part of the renderer migration. Those details describe the v1.5.1 build, not the current v1.5.5 release.
+
+This fork does not replace the upstream project's release or installation instructions.
 
 
 ## Features
 
-- **Search** — YouTube Music (Songs / Videos / Artists / Albums / Playlists) via ytmusicapi with yt-dlp fallback, plus SoundCloud, Bandcamp, Last.fm (built-in app key), and MusicBrainz search. Drill
+- **Search** — YouTube Music (Songs / Videos / Artists / Albums / Playlists) via the InnerTube API with yt-dlp fallback, plus SoundCloud, Bandcamp, Last.fm (built-in app key), and MusicBrainz search. Drill
   into artists, albums, and playlists.
 - **Custom providers** — Add your own Subsonic-compatible server (Navidrome, Airsonic, Gonic) or Jellyfin server in Settings, test the connection, and use it for search, playback, downloads, radio, browsing, and artist pages.
 - **Streaming & caching** — Stream audio via yt-dlp (YouTube/SoundCloud) or direct HTTP (Bandcamp), with fully native decoding, cached to disk for instant replay.
@@ -68,7 +64,7 @@ This is a focused fork branch for testing the TinySkia configuration; it does no
 ### Quick install (Linux / macOS)
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/awfghHJVBKLDHIOWAEFGUH/music_plr/release-prep/tiny-skia-v1.5.1/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/awfghHJVBKLDHIOWAEFGUH/music_plr/release-prep/tiny-skia-v1.5.5/scripts/install.sh | bash
 ```
 
 Detects your platform, downloads the latest release, and installs everything. On Linux it also sets up the desktop entry and icon.
@@ -110,8 +106,7 @@ Pick a language from the in-app **Settings** view. To add one, copy `src/i18n/en
 **Prerequisites**
 
 - **Rust** (stable, edition 2021)
-- **yt-dlp** — YouTube audio streaming and downloads
-- **Python 3** + `ytmusicapi` — YouTube Music search (optional; falls back to yt-dlp)
+- **yt-dlp** — YouTube audio streaming, downloads, and search pagination
 - **D-Bus** session bus (Linux) — for MPRIS
 - Network access — lyrics fetch live from [LRCLib](https://lrclib.net) and [Genius](https://genius.com) (no keys)
 

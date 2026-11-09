@@ -155,8 +155,7 @@ impl MusicPlayer {
             .iter()
             .find(|provider| provider.id == id)
         {
-            self.custom_provider_form =
-                Some(crate::app::CustomProviderForm::from_provider(provider));
+            self.custom_provider_form = Some(crate::app::CustomProviderForm::from(provider));
         }
     }
 
@@ -192,7 +191,7 @@ impl MusicPlayer {
         let id = form
             .id
             .unwrap_or_else(|| self.custom_providers.allocate_id());
-        let kind = form.kind;
+        let kind = form.draft.kind;
         // An edit that switches the backend re-identifies the server, so the
         // state filed under the old identity has to go with it.
         let previous_kind = form.id.and_then(|id| {
@@ -255,14 +254,14 @@ impl MusicPlayer {
         let Some(form) = &mut self.custom_provider_form else {
             return;
         };
-        if form.server_url.trim().is_empty() || form.username.trim().is_empty() {
+        if form.draft.server_url.trim().is_empty() || form.draft.username.trim().is_empty() {
             self.notify_error(self.strings.custom_provider_required);
             return;
         }
-        let kind = form.kind;
-        let server_url = form.server_url.trim().to_string();
-        let username = form.username.trim().to_string();
-        let password = form.password.clone();
+        let kind = form.draft.kind;
+        let server_url = form.draft.server_url.trim().to_string();
+        let username = form.draft.username.trim().to_string();
+        let password = form.draft.password.clone();
         form.test = ConnectionTest::Testing;
         form.test_rid = rid;
 
@@ -336,7 +335,7 @@ impl MusicPlayer {
         let Some(fallback_search) = fallback_search else {
             return;
         };
-        for pane in self.panes.values_mut() {
+        for pane in self.session.panes.values_mut() {
             if !pane.search_provider.capabilities().search || off.contains(&pane.search_provider) {
                 pane.search_provider = fallback_search;
                 if !fallback_search
@@ -355,7 +354,11 @@ mod tests {
     use std::sync::{Mutex, MutexGuard};
 
     use super::*;
-    use crate::{app::ViewData, data::config, providers::ProviderId};
+    use crate::{
+        app::ViewData,
+        data::config,
+        providers::{ArtistSectionKind, ProviderId},
+    };
 
     /// The provider lists read a process-global mirror, so the tests that
     /// switch a provider off and inspect those lists must not overlap.
@@ -445,5 +448,32 @@ mod tests {
         player.handle_settings_reset_defaults();
         assert!(player.config.disabled_providers.is_empty());
         assert!(ProviderId::searchable().contains(&ProviderId::LastFm));
+    }
+
+    #[test]
+    fn artist_section_pickers_drop_switched_off_providers() {
+        let _guard = lock();
+        let mut player = player();
+        player.handle_settings_change(SettingsChange::ProviderEnabled(
+            ProviderId::SoundCloud,
+            false,
+        ));
+
+        let albums = ArtistSectionKind::Albums.providers(ProviderId::YouTube);
+        assert!(albums.contains(&ProviderId::YouTube));
+        assert!(!albums.contains(&ProviderId::SoundCloud));
+
+        // The page's own provider stays offered even after it is switched off,
+        // because the sections it opened still name it.
+        let from_soundcloud = ArtistSectionKind::Albums.providers(ProviderId::SoundCloud);
+        assert!(from_soundcloud.contains(&ProviderId::SoundCloud));
+
+        player.handle_settings_change(SettingsChange::ProviderEnabled(
+            ProviderId::SoundCloud,
+            true,
+        ));
+        assert!(ArtistSectionKind::Albums
+            .providers(ProviderId::YouTube)
+            .contains(&ProviderId::SoundCloud));
     }
 }
