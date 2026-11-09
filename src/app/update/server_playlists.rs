@@ -513,7 +513,8 @@ impl MusicPlayer {
     /// Whether `pane` still exists and shows `target` — a pane can be closed
     /// while a write is in flight.
     fn shows_playlist_in(&self, pane: PaneId, target: &ServerPlaylistId) -> bool {
-        self.panes
+        self.session
+            .panes
             .get(&pane)
             .is_some_and(|pane| shows_playlist(pane.view_data(), target))
     }
@@ -748,13 +749,15 @@ impl MusicPlayer {
                 // reply; with no sidebar group to draw the row, the entry is
                 // dropped instead of lingering in the index.
                 if server_playlist_group(target.provider) {
-                    self.server_playlists.insert(ServerPlaylistEntry {
-                        provider: target.provider,
-                        id,
-                        name,
-                        thumbnail,
-                        track_count,
-                    });
+                    self.server_playlists.insert(ServerPlaylistEntry::new(
+                        target.provider,
+                        crate::providers::ServerPlaylist {
+                            id,
+                            name,
+                            track_count,
+                            thumbnail,
+                        },
+                    ));
                     // A new row was added to the measured sidebar list.
                     self.capture_bounds_task()
                 } else {
@@ -788,7 +791,8 @@ impl MusicPlayer {
 
     fn rename_server_playlist_views(&mut self, target: &ServerPlaylistId, name: &str) {
         for pane in self.pane_ids() {
-            for view in &mut self.pane_mut(pane).nav_history {
+            for entry in &mut self.pane_mut(pane).nav_history {
+                let view = std::sync::Arc::make_mut(entry);
                 if let ViewKind::PlaylistView(reference) = &mut view.kind {
                     if reference.provider == target.provider && reference.id == target.id {
                         reference.name = name.to_string();
@@ -1064,7 +1068,7 @@ mod tests {
     fn removed_rows_leave_the_page_at_once_and_come_back_on_failure() {
         let mut p = player_with_playlist(&["a", "b", "c"]);
         p.view_data_mut().selection = vec![0, 2];
-        let pane = p.focused_pane_id;
+        let pane = p.session.focused;
         p.remove_from_server_playlist(pane, &[1]);
 
         assert_eq!(titles(&p), ["Track a", "Track c"]);
@@ -1081,7 +1085,7 @@ mod tests {
     #[test]
     fn a_failed_reorder_restores_the_old_order() {
         let mut p = player_with_playlist(&["a", "b", "c"]);
-        let pane = p.focused_pane_id;
+        let pane = p.session.focused;
         p.view_data_mut().selection = vec![0];
 
         let positions = p.handle_reorder_tracks_selected(pane, 3, &[0]);
@@ -1097,7 +1101,7 @@ mod tests {
     #[test]
     fn a_failed_rename_restores_the_name_everywhere() {
         let mut p = player_with_playlist(&["a"]);
-        p.handle_server_playlist_rename(p.focused_pane_id, " Renamed ");
+        p.handle_server_playlist_rename(p.session.focused, " Renamed ");
 
         // The rename is optimistic: the index record and the open page show
         // the typed name at once.
@@ -1141,7 +1145,7 @@ mod tests {
     fn typed_renames_debounce_into_one_server_write() {
         let mut p = player_with_playlist(&["a"]);
         for name in ["R", "Re", "Renamed"] {
-            p.handle_server_playlist_rename(p.focused_pane_id, name);
+            p.handle_server_playlist_rename(p.session.focused, name);
         }
 
         // Nothing went out while the typing was under way.
@@ -1169,7 +1173,7 @@ mod tests {
     #[test]
     fn deleting_a_playlist_drops_its_typed_rename() {
         let mut p = player_with_playlist(&["a"]);
-        p.handle_server_playlist_rename(p.focused_pane_id, "R");
+        p.handle_server_playlist_rename(p.session.focused, "R");
         assert!(p.pending_server_renames.contains_key(&target()));
 
         let write_id = p.request_ids.next();
@@ -1222,13 +1226,15 @@ mod tests {
         );
         assert_eq!(
             p.server_playlists.entries.last(),
-            Some(&ServerPlaylistEntry {
-                provider: provider(),
-                id: "pl".into(),
-                name: "Server".into(),
-                thumbnail: String::new(),
-                track_count: 1,
-            })
+            Some(&ServerPlaylistEntry::new(
+                provider(),
+                ServerPlaylist {
+                    id: "pl".into(),
+                    name: "Server".into(),
+                    thumbnail: String::new(),
+                    track_count: 1,
+                },
+            ))
         );
 
         let _ = p.add_tracks_to_server_playlist(target(), vec![track("b")]);

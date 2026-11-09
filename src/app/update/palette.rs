@@ -174,7 +174,7 @@ impl MusicPlayer {
                     return Task::none();
                 };
                 self.dialog = None;
-                let pane = self.focused_pane_id;
+                let pane = self.session.focused;
                 self.open_server_playlist(pane, target, &name, play)
             }
             PaletteItem::Library(index) => {
@@ -182,7 +182,7 @@ impl MusicPlayer {
                     return Task::none();
                 };
                 self.dialog = None;
-                let pane = self.focused_pane_id;
+                let pane = self.session.focused;
                 let target = ViewKind::from(item.as_ref());
                 self.open_card(pane, &target)
             }

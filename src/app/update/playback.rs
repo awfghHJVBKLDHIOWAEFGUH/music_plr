@@ -13,6 +13,22 @@ use crate::{
     providers::ProviderId,
 };
 
+/// Where an edited track also has to be written back: the copy inside a local
+/// playlist, or the trash bin.
+#[derive(Clone, Copy)]
+pub(super) enum TrackHome {
+    Playlist(usize),
+    Trashbin,
+}
+
+pub(super) fn track_home(kind: &ViewKind) -> Option<TrackHome> {
+    match kind {
+        ViewKind::Playlist(entry) => Some(TrackHome::Playlist(entry.index)),
+        ViewKind::Trashbin => Some(TrackHome::Trashbin),
+        _ => None,
+    }
+}
+
 impl MusicPlayer {
     pub fn handle_play_track(&mut self, pos: TrackPos) {
         let TrackPos { index, pane } = pos;
@@ -29,7 +45,7 @@ impl MusicPlayer {
                 }
             }
             QUEUE_PANE_ID => {
-                let queue = self.queue.tracks.get(index..).unwrap_or(&[]);
+                let queue = self.session.queue.tracks.get(index..).unwrap_or(&[]);
                 self.set_queue(queue.to_vec());
             }
             // The popup's results are a transient list inside a dialog, so
@@ -47,8 +63,9 @@ impl MusicPlayer {
     }
 
     /// Snapshot the current view as the source of the track being played.
+    /// History entries are shared, so this is a refcount bump, not a copy.
     pub(super) fn record_now_playing_origin(&mut self) {
-        self.now_playing_from = Some(self.view_data().clone());
+        self.session.now_playing_from = Some(self.focused_pane().view_data_arc().clone());
         self.save_session();
     }
 
@@ -57,7 +74,7 @@ impl MusicPlayer {
     pub(super) fn set_track_at(&mut self, pos: TrackPos, track: Track) {
         let TrackPos { index, pane } = pos;
         if pane == QUEUE_PANE_ID {
-            if let Some(t) = self.queue.tracks.get_mut(index) {
+            if let Some(t) = self.session.queue.tracks.get_mut(index) {
                 *t = track;
             }
         } else if pane == MANUAL_SEARCH_PANE_ID {
@@ -69,27 +86,38 @@ impl MusicPlayer {
                 }
             }
         } else if is_main_pane(pane) {
-            let view = self.view_data_in_mut(pane);
-            if let Some(t) = view.tracks_mut().and_then(|ts| ts.get_mut(index)) {
-                *t = track.clone();
+            let home = {
+                let view = self.view_data_in_mut(pane);
+                if let Some(t) = view.tracks_mut().and_then(|ts| ts.get_mut(index)) {
+                    *t = track.clone();
+                }
+                track_home(&view.kind)
+            };
+            if let Some(home) = home {
+                self.mirror_track_into_store(home, index, track);
             }
-            match &view.kind {
-                ViewKind::Playlist(entry) => {
-                    let sp = entry.index;
-                    if let Some(pl) = self.playlists.playlists.get_mut(sp) {
-                        if let Some(t) = pl.tracks.get_mut(index) {
-                            *t = track;
-                        }
-                    }
-                    self.playlists.save();
+        }
+    }
+
+    /// Copy `track` into the store backing the view it was edited in.
+    pub(super) fn mirror_track_into_store(&mut self, home: TrackHome, index: usize, track: Track) {
+        match home {
+            TrackHome::Playlist(playlist) => {
+                if let Some(t) = self
+                    .playlists
+                    .playlists
+                    .get_mut(playlist)
+                    .and_then(|p| p.tracks.get_mut(index))
+                {
+                    *t = track;
                 }
-                ViewKind::Trashbin => {
-                    if let Some(t) = self.trashbin.tracks.get_mut(index) {
-                        *t = track;
-                    }
-                    self.trashbin.save();
+                self.playlists.save();
+            }
+            TrackHome::Trashbin => {
+                if let Some(t) = self.trashbin.tracks.get_mut(index) {
+                    *t = track;
                 }
-                _ => {}
+                self.trashbin.save();
             }
         }
     }
@@ -100,7 +128,8 @@ impl MusicPlayer {
     /// without playing. Trashed tracks stay in the queue and are skipped when
     /// playback reaches them.
     pub fn set_queue(&mut self, tracks: Vec<Track>) {
-        self.queue
+        self.session
+            .queue
             .set_queue(tracks, self.config.max_recently_played);
         self.skip_trashed_and_play_current();
     }
@@ -110,10 +139,15 @@ impl MusicPlayer {
     /// point for (re)starting playback on a queue that may begin with
     /// trashed tracks.
     fn skip_trashed_and_play_current(&mut self) {
-        while self.queue.current().is_some_and(|t| self.is_trashed(t)) {
-            self.queue.advance();
+        while self
+            .session
+            .queue
+            .current()
+            .is_some_and(|t| self.is_trashed(t))
+        {
+            self.session.queue.advance();
         }
-        if let Some(first) = self.queue.current().cloned() {
+        if let Some(first) = self.session.queue.current().cloned() {
             let preferred = if first.best_stream_provider(first.source).is_some() {
                 first.source
             } else {
@@ -184,7 +218,7 @@ impl MusicPlayer {
     fn resolve_provider(&mut self, provider: ProviderId, track: Track, pos: TrackPos, play: bool) {
         let msg = (self.strings.resolving_on)(&track.title, &self.strings.provider(provider));
         self.notify(msg);
-        let rid = if is_main_pane(pos.pane) && self.panes.contains_key(&pos.pane) {
+        let rid = if is_main_pane(pos.pane) && self.session.panes.contains_key(&pos.pane) {
             self.slot_request_id(pos.pane)
         } else {
             0
@@ -359,8 +393,12 @@ impl MusicPlayer {
 
     pub fn handle_reorder_queue(&mut self, drop_idx: usize, indices: &[usize]) -> Vec<usize> {
         let selection = std::mem::take(&mut self.queue_selected_indices);
-        let new_positions =
-            crate::util::reorder_tracks(&mut self.queue.tracks, drop_idx, indices, selection);
+        let new_positions = crate::util::reorder_tracks(
+            &mut self.session.queue.tracks,
+            drop_idx,
+            indices,
+            selection,
+        );
         self.save_session();
         new_positions
     }
@@ -371,8 +409,11 @@ impl MusicPlayer {
             return;
         }
         let inserted = tracks.len();
-        let insert_at = self.queue.tracks.len().min(1);
-        self.queue.tracks.splice(insert_at..insert_at, tracks);
+        let insert_at = self.session.queue.tracks.len().min(1);
+        self.session
+            .queue
+            .tracks
+            .splice(insert_at..insert_at, tracks);
         self.save_session();
         let tr = self.strings;
         self.notify((tr.added_to)(inserted, tr.queue));
@@ -380,7 +421,7 @@ impl MusicPlayer {
     }
 
     pub fn handle_remove_from_queue_batch(&mut self, indices: &[usize]) {
-        let removed = crate::util::remove_at(&mut self.queue.tracks, indices);
+        let removed = crate::util::remove_at(&mut self.session.queue.tracks, indices);
         self.media_controls_dirty = true;
         self.save_session();
         let tr = self.strings;
@@ -390,7 +431,7 @@ impl MusicPlayer {
     }
 
     pub fn handle_remove_from_recent_batch(&mut self, indices: &[usize]) {
-        let removed = self.queue.remove_recent_at(indices);
+        let removed = self.session.queue.remove_recent_at(indices);
         self.save_session();
         let tr = self.strings;
         let msg = (tr.removed_from)(removed, tr.recently_played);
@@ -399,7 +440,7 @@ impl MusicPlayer {
     }
 
     pub fn toggle_play_pause(&mut self) {
-        if let Some(track) = self.queue.current().cloned() {
+        if let Some(track) = self.session.queue.current().cloned() {
             if self.is_playing {
                 self.progress = self.playback_progress();
                 self.is_playing = false;
@@ -419,17 +460,23 @@ impl MusicPlayer {
     }
 
     pub fn next_track(&mut self) {
-        if let Some(old) = self.queue.current().cloned() {
-            self.queue
+        if let Some(old) = self.session.queue.current().cloned() {
+            self.session
+                .queue
                 .record_played(&old, self.config.max_recently_played);
-            self.queue.advance();
+            self.session.queue.advance();
         }
 
-        while self.queue.current().is_some_and(|t| self.is_trashed(t)) {
-            self.queue.advance();
+        while self
+            .session
+            .queue
+            .current()
+            .is_some_and(|t| self.is_trashed(t))
+        {
+            self.session.queue.advance();
         }
 
-        if let Some(t) = self.queue.current() {
+        if let Some(t) = self.session.queue.current() {
             self.track_loading = true;
             let t = t.clone();
             self.play_track_internal(&t, t.source);
@@ -439,12 +486,16 @@ impl MusicPlayer {
     }
 
     pub fn previous_track(&mut self) {
-        let Some(prev_pos) = self.queue.previous_pos_filtered(|t| !self.is_trashed(t)) else {
+        let Some(prev_pos) = self
+            .session
+            .queue
+            .previous_pos_filtered(|t| !self.is_trashed(t))
+        else {
             return;
         };
-        self.queue.restore_previous(prev_pos);
+        self.session.queue.restore_previous(prev_pos);
         self.track_loading = true;
-        if let Some(t) = self.queue.current() {
+        if let Some(t) = self.session.queue.current() {
             let t = t.clone();
             self.play_track_internal(&t, t.source);
         }
@@ -453,8 +504,8 @@ impl MusicPlayer {
     }
 
     pub fn set_volume(&mut self, vol: f32) {
-        self.volume = vol.clamp(0.0, 1.0);
-        self.audio.set_volume(self.volume);
+        self.session.volume = vol.clamp(0.0, 1.0);
+        self.audio.set_volume(self.session.volume);
         self.save_session();
         self.media_controls_dirty = true;
     }
@@ -463,12 +514,12 @@ impl MusicPlayer {
         if delta > 0.0 {
             self.muted_volume = None;
         }
-        self.set_volume(self.volume + delta);
+        self.set_volume(self.session.volume + delta);
     }
 
     pub fn toggle_mute(&mut self) {
-        if self.volume > 0.0 {
-            self.muted_volume = Some(self.volume);
+        if self.session.volume > 0.0 {
+            self.muted_volume = Some(self.session.volume);
             self.set_volume(0.0);
         } else {
             let restore = self.muted_volume.take().unwrap_or(0.8);

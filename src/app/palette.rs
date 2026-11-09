@@ -132,7 +132,7 @@ impl PaletteItem {
     pub fn message(self, player: &MusicPlayer) -> Option<Message> {
         match self {
             Self::Command(id) => Some(id.message(player)),
-            Self::View(view) => Some(view.message(player.focused_pane_id)),
+            Self::View(view) => Some(view.message(player.session.focused)),
             Self::Library(_) | Self::Playlist(_) | Self::ServerPlaylist(_) => None,
         }
     }
@@ -371,7 +371,7 @@ mod tests {
         let mut palette = palette("");
         palette.mode = PaletteMode::AddToPlaylist(PendingAdd {
             indices: vec![0],
-            pane: p.focused_pane_id,
+            pane: p.session.focused,
         });
         let rows = palette.rows(&p);
         assert_eq!(rows.len(), 2);

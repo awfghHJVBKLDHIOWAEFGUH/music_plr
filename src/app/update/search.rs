@@ -81,7 +81,7 @@ impl MusicPlayer {
     pub fn handle_search_scope_changed(
         &mut self,
         pane: PaneId,
-        scope: crate::providers::SearchScope,
+        scope: SearchScope,
     ) -> Task<Message> {
         if scope != self.pane(pane).search_scope {
             self.pane_mut(pane).search_scope = scope;
@@ -93,13 +93,13 @@ impl MusicPlayer {
 
     /// The localized name of a search scope. `&'static` (not tied to the
     /// player) so it can label a scope chip built outside a view's borrow.
-    pub fn scope_name(&self, scope: crate::providers::SearchScope) -> &'static str {
+    pub fn scope_name(&self, scope: SearchScope) -> &'static str {
         match scope {
-            crate::providers::SearchScope::Songs => self.strings.scope_songs,
-            crate::providers::SearchScope::Videos => self.strings.scope_videos,
-            crate::providers::SearchScope::Artists => self.strings.scope_artists,
-            crate::providers::SearchScope::Albums => self.strings.scope_albums,
-            crate::providers::SearchScope::Playlists => self.strings.scope_playlists,
+            SearchScope::Songs => self.strings.scope_songs,
+            SearchScope::Videos => self.strings.scope_videos,
+            SearchScope::Artists => self.strings.scope_artists,
+            SearchScope::Albums => self.strings.scope_albums,
+            SearchScope::Playlists => self.strings.scope_playlists,
         }
     }
 
@@ -137,7 +137,7 @@ impl MusicPlayer {
         self.stage_search_provider(pane, next);
     }
 
-    pub fn stage_search_scope(&mut self, pane: PaneId, scope: crate::providers::SearchScope) {
+    pub fn stage_search_scope(&mut self, pane: PaneId, scope: SearchScope) {
         if scope == self.pane(pane).search_scope {
             return;
         }
@@ -278,7 +278,7 @@ impl MusicPlayer {
     /// `suppress_history_close` so the press-less release from the same click
     /// doesn't dismiss what was just opened.
     pub fn handle_search_input_clicked(&mut self, pane: PaneId) -> Task<Message> {
-        self.focused_pane_id = pane;
+        self.session.focused = pane;
         self.drag.stop();
         for other in self.pane_ids() {
             if other != pane && self.pane(other).show_search_history {
@@ -452,7 +452,7 @@ impl MusicPlayer {
 mod tests {
     use super::*;
     use crate::{
-        data::config,
+        data::{config, library::LibraryKind},
         providers::{ProviderId, SearchScope},
     };
 
@@ -469,10 +469,16 @@ mod tests {
     fn cards(ids: &[&str]) -> crate::providers::SearchTab {
         crate::providers::SearchTab::Artists(
             ids.iter()
-                .map(|id| crate::providers::CardData {
-                    id: (*id).into(),
-                    title: (*id).into(),
-                    ..Default::default()
+                .map(|id| {
+                    crate::providers::CardData::new(
+                        LibraryKind::Artist,
+                        ProviderId::YouTube,
+                        *id,
+                        *id,
+                        "",
+                        "",
+                        "",
+                    )
                 })
                 .collect(),
         )
@@ -488,7 +494,7 @@ mod tests {
             ProviderId::SoundCloud,
             SearchScope::Artists,
         )]);
-        let pane = p.focused_pane_id;
+        let pane = p.session.focused;
         let rid = p.request_ids.next();
         p.view_data_mut().request_id = rid;
         let _ = p.process_result(BackendResult::SearchResults(
@@ -521,7 +527,7 @@ mod tests {
     #[test]
     fn provider_cycle_wraps_and_clamps_scope() {
         let mut p = player();
-        let pane = p.focused_pane_id;
+        let pane = p.session.focused;
         let start = p.pane(pane).search_provider;
         for _ in 0..ProviderId::searchable().len() {
             p.cycle_search_provider(pane, 1);

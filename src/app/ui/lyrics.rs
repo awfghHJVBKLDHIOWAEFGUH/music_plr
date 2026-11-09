@@ -32,7 +32,7 @@ pub(super) fn view_lyrics<'a>(
     if lyrics_state.editing {
         return view_custom_editor(player, pane, lyrics_state);
     }
-    let track = player.queue.current();
+    let track = player.session.queue.current();
 
     let displayed = lyrics_state.displayed_lyrics();
     let lyrics_ready = displayed.is_some();

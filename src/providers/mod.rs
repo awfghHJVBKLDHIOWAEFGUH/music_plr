@@ -34,9 +34,15 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::{data::custom_providers::CustomProviderKind, types::Track};
+use crate::{
+    data::{
+        custom_providers::CustomProviderKind,
+        library::{Card, LegacyCardFields, LibraryItem, LibraryKind},
+    },
+    types::Track,
+};
 
 /// Drain a child pipe to completion, returning what was read. Run it on a
 /// helper thread while polling `try_wait` so a chatty child can't deadlock
@@ -262,8 +268,8 @@ fn build_offered_lists() -> OfferedLists {
         .filter(|provider| provider.enabled())
         .collect();
     let offered = |mut providers: Vec<ProviderId>| {
-        providers.extend(offered_customs.iter().copied());
         providers.retain(|provider| provider.enabled());
+        providers.extend(&offered_customs);
         providers
     };
     OfferedLists {
@@ -672,17 +678,71 @@ impl SearchScope {
     }
 }
 
-/// Provider-agnostic card result (artist/album/playlist drill-down). `url` is
-/// the public page the provider advertised for the card, empty when it exposes
-/// none (the card is then not offered "Open in browser").
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
+/// Provider-agnostic card result (artist/album/playlist drill-down). The
+/// [`Card`] is the identity; `subtitle` is the only display-only extra.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct CardData {
-    pub id: String,
-    pub title: String,
+    pub card: Card,
     pub subtitle: String,
-    pub thumbnail: String,
-    pub url: String,
+}
+
+impl<'de> Deserialize<'de> for CardData {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Default, Deserialize)]
+        #[serde(default)]
+        struct CardDataCompat {
+            card: Option<Card>,
+            subtitle: String,
+            #[serde(flatten)]
+            legacy: LegacyCardFields,
+        }
+
+        let compat = CardDataCompat::deserialize(deserializer)?;
+        Ok(match compat.card {
+            Some(card) => Self {
+                card,
+                subtitle: compat.subtitle,
+            },
+            // v1.5.4 stored flat cards without an identity; the session
+            // migration fills the kind and provider from the owning view.
+            None => Self::new(
+                LibraryKind::Album,
+                ProviderId::default(),
+                compat.legacy.id,
+                compat.legacy.title,
+                compat.subtitle,
+                compat.legacy.thumbnail,
+                compat.legacy.url,
+            ),
+        })
+    }
+}
+
+impl CardData {
+    pub fn new(
+        kind: LibraryKind,
+        provider: ProviderId,
+        id: impl Into<String>,
+        title: impl Into<String>,
+        subtitle: impl Into<String>,
+        thumbnail: impl Into<String>,
+        url: impl Into<String>,
+    ) -> Self {
+        Self {
+            card: Card::new(LibraryItem {
+                kind,
+                provider,
+                id: id.into(),
+                title: title.into(),
+                thumbnail: thumbnail.into(),
+                url: url.into(),
+            }),
+            subtitle: subtitle.into(),
+        }
+    }
 }
 
 /// Provider-agnostic search result: the playable tracks plus the active tab
@@ -843,7 +903,6 @@ pub struct ServerPlaylist {
     pub id: String,
     pub name: String,
     pub track_count: usize,
-    /// The playlist's cover-art URL, empty when the server has none.
     pub thumbnail: String,
 }
 
@@ -971,20 +1030,20 @@ pub fn delete_playlist(provider: ProviderId, playlist_id: &str) -> Result<()> {
 }
 
 pub use artist_page::{
-    ArtistAlbumCard, ArtistDataKind, ArtistHeader, ArtistKindData, ArtistPage, ArtistPageState,
-    ArtistSection, ArtistSectionKind, RelatedArtistCard, SectionContent,
+    ArtistAlbumCard, ArtistDataKind, ArtistHeader, ArtistPage, ArtistPageState, ArtistSection,
+    ArtistSectionKind, RelatedArtistCard, SectionContent,
 };
 pub use error::{ErrorKind, ProviderError};
 pub use home::{
-    fetch_home, home_providers, sort_sections, HomeCard, HomeSection, HomeSectionData,
-    HomeSectionKey, HomeSectionKind,
+    fetch_home, home_providers, sort_sections, HomeSection, HomeSectionData, HomeSectionKey,
+    HomeSectionKind,
 };
 
 /// One artist-page section fetch result: the kind and its data (or error).
 /// See [`spawn_artist_kinds_fetch`].
 pub struct ArtistKindResult(
     pub ArtistDataKind,
-    pub Result<ArtistKindData, ProviderError>,
+    pub Result<SectionContent, ProviderError>,
 );
 
 /// Fetch each requested kind of `provider`'s artist page on a background
@@ -1045,7 +1104,7 @@ pub fn spawn_artist_kinds_fetch(
                         youtube::enrich_track_metadata(&mut page.popular);
                         let _ = tx.send(ArtistKindResult(
                             ArtistDataKind::Popular,
-                            Ok(ArtistKindData::Popular(page.popular)),
+                            Ok(SectionContent::Tracks(page.popular)),
                         ));
                     }
                 }
@@ -1058,14 +1117,17 @@ pub fn spawn_artist_kinds_fetch(
 /// Project `page` down to just `kind`'s data. `None` means the page has no
 /// data for that kind (e.g. no header) — the kind is skipped rather than
 /// cached as covered with empty content.
-fn single_kind_data(page: &ArtistPage, kind: ArtistDataKind) -> Option<ArtistKindData> {
-    use artist_page::ArtistKindData as D;
+fn single_kind_data(page: &ArtistPage, kind: ArtistDataKind) -> Option<SectionContent> {
+    use artist_page::SectionContent as C;
     match kind {
-        ArtistDataKind::Header => page.header.clone().map(D::Header),
-        ArtistDataKind::Popular => Some(D::Popular(page.popular.clone())),
-        ArtistDataKind::Albums => Some(D::Albums(page.albums.clone())),
-        ArtistDataKind::Playlists => Some(D::Playlists(page.playlists.clone())),
-        ArtistDataKind::Related => Some(D::Related(page.related.clone())),
+        ArtistDataKind::Header => page
+            .header
+            .clone()
+            .map(|header| C::Header(Box::new(header))),
+        ArtistDataKind::Popular => Some(C::Tracks(page.popular.clone())),
+        ArtistDataKind::Albums => Some(C::Albums(page.albums.clone())),
+        ArtistDataKind::Playlists => Some(C::Playlists(page.playlists.clone())),
+        ArtistDataKind::Related => Some(C::Related(page.related.clone())),
     }
 }
 
@@ -1254,11 +1316,7 @@ mod tests {
     }
 
     fn card(id: &str) -> CardData {
-        CardData {
-            id: id.into(),
-            title: id.into(),
-            ..Default::default()
-        }
+        CardData::new(LibraryKind::Artist, ProviderId::YouTube, id, id, "", "", "")
     }
 
     #[test]

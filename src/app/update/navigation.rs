@@ -39,13 +39,14 @@ impl MusicPlayer {
         }
     }
 
-    pub(super) fn restore_nav_entry(&mut self, pane: PaneId, data: ViewData) -> Task<Message> {
+    /// Run the side effects that follow the current history entry changing.
+    /// The entry already lives at `nav_history[nav_history_pos]`, so nothing
+    /// has to be copied back into the pane.
+    pub(super) fn after_nav_change(&mut self, pane: PaneId) -> Task<Message> {
         // Scroll position is stored relative to the main track_list scrollable.
         // (Queue view uses a different Id and is not navigated via history.)
-        let y = data.scroll;
-        let home = matches!(data.kind, ViewKind::Home(_));
-        *self.view_data_in_mut(pane) = data;
-        if home {
+        let y = self.view_data_in(pane).scroll;
+        if matches!(&self.view_data_in(pane).kind, ViewKind::Home(_)) {
             self.bounds.forget_home_rails(pane);
         }
         self.sync_search_query(pane);
@@ -63,7 +64,12 @@ impl MusicPlayer {
 
     pub(super) fn sync_downloads_view(&mut self, pane: PaneId) {
         if matches!(self.view_data_in(pane).kind, ViewKind::Downloads) {
-            let tracks = self.download_registry.clone_tracks();
+            let tracks = self
+                .download_registry
+                .tracks()
+                .into_iter()
+                .cloned()
+                .collect();
             self.view_data_in_mut(pane).set_tracks(tracks);
         }
     }
@@ -76,7 +82,7 @@ impl MusicPlayer {
     pub(super) fn push_new_view(&mut self, pane: PaneId, data: ViewData) -> Task<Message> {
         // Showing content in a pane focuses it (click-to-focus for drill-downs,
         // search, radio, and playlist jumps).
-        self.focused_pane_id = pane;
+        self.session.focused = pane;
         // A Home page rebuilds its rails from the top, so offsets remembered
         // from the last visit are dropped rather than misplacing the next
         // card menu.
@@ -85,7 +91,7 @@ impl MusicPlayer {
         }
         let p = self.pane_mut(pane);
         p.nav_history.truncate(p.nav_history_pos + 1);
-        p.nav_history.push(data);
+        p.nav_history.push(std::sync::Arc::new(data));
         if p.nav_history.len() > 20 {
             p.nav_history.remove(0);
         }
@@ -136,22 +142,23 @@ impl MusicPlayer {
     }
 
     fn sync_navigation(&mut self, pane: PaneId) -> Task<Message> {
-        let entry = self.pane(pane).nav_history[self.pane(pane).nav_history_pos].clone();
-        let task = self.restore_nav_entry(pane, entry);
+        let task = self.after_nav_change(pane);
         self.save_session();
         task.chain(self.capture_bounds_task())
     }
 
     pub fn handle_reveal_now_playing(&mut self) -> Task<Message> {
-        let pane = self.focused_pane_id;
-        let Some(mut origin) = self.now_playing_from.clone() else {
+        let pane = self.session.focused;
+        let Some(origin) = self.session.now_playing_from.clone() else {
             return Task::none();
         };
-        let Some(track) = self.queue.current().cloned() else {
+        let Some(track) = self.session.queue.current().cloned() else {
             return Task::none();
         };
-        // Zero the id so an in-flight response for the live view can never
-        // be routed into the restored snapshot.
+        // Zero the id so an in-flight response for the live view can never be
+        // routed into the restored snapshot. Reveal is a one-off action, so
+        // copying the snapshot out of its `Arc` here is fine.
+        let mut origin = (*origin).clone();
         origin.request_id = 0;
         let nav_task = self.handle_navigate_to(pane, origin);
         let index = self
@@ -165,7 +172,7 @@ impl MusicPlayer {
     }
 
     pub(super) fn slot_for_request(&self, rid: u64) -> Option<(PaneId, usize)> {
-        for (id, pane) in &self.panes {
+        for (id, pane) in &self.session.panes {
             if let Some(idx) = pane.nav_history.iter().position(|v| v.request_id == rid) {
                 return Some((*id, idx));
             }
@@ -179,14 +186,14 @@ impl MusicPlayer {
     /// moves to the new pane. The fork keeps the lyrics overlay open; transient
     /// dropdown state starts closed.
     pub fn split_pane(&mut self, pane: PaneId, dir: SplitDir) -> Task<Message> {
-        if !self.split_root.contains(pane) {
+        if !self.session.root.contains(pane) {
             return Task::none();
         }
-        if self.split_root.leaf_count() >= MAX_PANES {
+        if self.session.root.leaf_count() >= MAX_PANES {
             self.notify(self.strings.max_panes_reached);
             return Task::none();
         }
-        let Some(source) = self.panes.get(&pane).cloned() else {
+        let Some(source) = self.session.panes.get(&pane).cloned() else {
             return Task::none();
         };
         let new_id = self.next_pane_id;
@@ -196,9 +203,9 @@ impl MusicPlayer {
         fork.id = new_id;
         fork.show_search_history = false;
         fork.last_filtered_history = Vec::new();
-        self.panes.insert(new_id, fork);
-        self.split_root.split_leaf(pane, new_id, dir);
-        self.focused_pane_id = new_id;
+        self.session.panes.insert(new_id, fork);
+        self.session.root.split_leaf(pane, new_id, dir);
+        self.session.focused = new_id;
         self.save_session();
         // Splitting reveals the pane header, which reshapes the widget tree
         // and drops the scrollables' offsets — capture the new geometry first,
@@ -236,7 +243,7 @@ impl MusicPlayer {
     }
 
     pub fn close_pane(&mut self, pane: PaneId) -> Task<Message> {
-        if self.split_root.leaf_count() <= 1 {
+        if self.session.root.leaf_count() <= 1 {
             return Task::none();
         }
         // A dialog anchored to the closing pane (context menu, card menu,
@@ -276,19 +283,22 @@ impl MusicPlayer {
         }
         self.bounds.forget_pane(pane);
         self.drag.forget_pane(pane);
-        let survivor = self.split_root.remove_leaf(pane);
-        self.panes.remove(&pane);
+        let survivor = self.session.root.remove_leaf(pane);
+        self.session.panes.remove(&pane);
         if let Some(survivor) = survivor {
-            if self.focused_pane_id == pane || !self.panes.contains_key(&self.focused_pane_id) {
-                self.focused_pane_id = survivor;
+            if self.session.focused == pane
+                || !self.session.panes.contains_key(&self.session.focused)
+            {
+                self.session.focused = survivor;
             }
         }
         self.save_session();
         // Closing reflows the layout, which can drop the scrollables'
         // offsets — capture the new geometry first, then restore the focused
         // pane's position.
-        let focused = self.focused_pane_id;
+        let focused = self.session.focused;
         let scroll_y = self
+            .session
             .panes
             .get(&focused)
             .map_or(0.0, |p| p.view_data().scroll);
@@ -303,9 +313,9 @@ impl MusicPlayer {
     }
 
     pub fn focus_pane(&mut self, pane: PaneId) -> bool {
-        let needs_focus = self.focused_pane_id != pane && self.panes.contains_key(&pane);
+        let needs_focus = self.session.focused != pane && self.session.panes.contains_key(&pane);
         if needs_focus {
-            self.focused_pane_id = pane;
+            self.session.focused = pane;
             self.save_session();
         }
         needs_focus
@@ -313,7 +323,7 @@ impl MusicPlayer {
 
     pub fn focus_pane_at(&mut self, index: usize) -> Task<Message> {
         let mut leaves = Vec::new();
-        self.split_root.leaves(&mut leaves);
+        self.session.root.leaves(&mut leaves);
         if let Some(&id) = leaves.get(index) {
             self.focus_pane_and_recall(id)
         } else {
@@ -323,10 +333,10 @@ impl MusicPlayer {
 
     pub fn focus_next_pane(&mut self, dir: isize) -> Task<Message> {
         let mut leaves = Vec::new();
-        self.split_root.leaves(&mut leaves);
+        self.session.root.leaves(&mut leaves);
         let cur = leaves
             .iter()
-            .position(|&id| id == self.focused_pane_id)
+            .position(|&id| id == self.session.focused)
             .unwrap_or(0)
             .cast_signed();
         let next = leaves[((cur + dir).rem_euclid(leaves.len().max(1).cast_signed())) as usize];
@@ -338,9 +348,10 @@ impl MusicPlayer {
     /// wraps at list ends).
     pub fn focus_neighbor(&mut self, dir: crate::app::pane::PaneDir) -> Task<Message> {
         let next = self
-            .split_root
-            .neighbor(self.focused_pane_id, dir)
-            .unwrap_or_else(|| self.split_root.wrap_edge(self.focused_pane_id, dir));
+            .session
+            .root
+            .neighbor(self.session.focused, dir)
+            .unwrap_or_else(|| self.session.root.wrap_edge(self.session.focused, dir));
         self.focus_pane_and_recall(next)
     }
 
@@ -352,7 +363,7 @@ impl MusicPlayer {
         if !self.focus_pane(pane) {
             return Task::none();
         }
-        let pane = self.focused_pane_id;
+        let pane = self.session.focused;
         let first = pane_first_index(pane);
         let count = self.track_count_in(pane);
         if count > first {
@@ -390,7 +401,7 @@ mod tests {
         let first = p.request_ids.next();
         p.view_data_mut().request_id = first;
 
-        let pane = p.focused_pane_id;
+        let pane = p.session.focused;
         let _ = p.handle_navigate_to(pane, ViewData::new_playlist(1, "Other".into()));
         let second = p.request_ids.next();
         p.view_data_mut().request_id = second;
@@ -406,7 +417,7 @@ mod tests {
     fn navigate_back_restores_outgoing_view() {
         let mut p = player();
         // Default view is Search. Navigate to a Playlist as the outgoing view.
-        let pane = p.focused_pane_id;
+        let pane = p.session.focused;
         let _ = p.handle_navigate_to(pane, ViewData::new_playlist(2, "My List".into()));
         assert_eq!(p.pane(pane).nav_history.len(), 2);
         assert!(p.can_navigate_back(pane));
@@ -434,7 +445,7 @@ mod tests {
     #[test]
     fn replacing_view_keeps_outgoing_slot() {
         let mut p = player();
-        let pane = p.focused_pane_id;
+        let pane = p.session.focused;
         let _ = p.handle_navigate_to(pane, ViewData::new_playlist(0, "A".into()));
         let _ = p.handle_navigate_to(pane, ViewData::new_playlist(1, "B".into()));
         // Three slots: initial Playlist (from PlaylistStore), Playlist(0), Playlist(1).
@@ -458,7 +469,7 @@ mod tests {
         let mut p = player();
         // Replicates `run_search`'s slot stamping; the threaded version can't
         // run here.
-        let pane = p.focused_pane_id;
+        let pane = p.session.focused;
         let _ = p.handle_navigate_to(
             pane,
             ViewData::new_search("song".into(), ProviderId::YouTube, SearchScope::Songs),
@@ -515,13 +526,13 @@ mod tests {
     #[test]
     fn split_forks_history_and_navigates_independently() {
         let mut p = player();
-        let pane = p.focused_pane_id;
+        let pane = p.session.focused;
         let _ = p.handle_navigate_to(pane, ViewData::new_playlist(2, "My List".into()));
 
         let _ = p.split_pane(pane, SplitDir::Horizontal);
-        let fork = p.focused_pane_id;
+        let fork = p.session.focused;
         assert_ne!(pane, fork);
-        assert_eq!(p.split_root.leaf_count(), 2);
+        assert_eq!(p.session.root.leaf_count(), 2);
         assert!(matches!(p.view_data_in(fork).kind, ViewKind::Playlist(_)));
 
         let _ = p.handle_navigate_to(fork, ViewData::new_playlist(5, "Other".into()));
@@ -537,8 +548,8 @@ mod tests {
         let _ = p.handle_navigate_back(fork);
         assert!(matches!(p.view_data_in(fork).kind, ViewKind::Playlist(_)));
         let _ = p.close_pane(fork);
-        assert_eq!(p.split_root.leaf_count(), 1);
-        assert_eq!(p.focused_pane_id, pane);
+        assert_eq!(p.session.root.leaf_count(), 1);
+        assert_eq!(p.session.focused, pane);
         assert!(matches!(p.view_data().kind, ViewKind::Playlist(_)));
     }
 
@@ -546,23 +557,23 @@ mod tests {
     fn focus_wraps_past_edge() {
         use crate::app::pane::PaneDir;
         let mut p = player();
-        let pane = p.focused_pane_id;
+        let pane = p.session.focused;
         let _ = p.split_pane(pane, SplitDir::Horizontal);
-        let fork = p.focused_pane_id;
+        let fork = p.session.focused;
         let _ = p.focus_neighbor(PaneDir::Right);
-        assert_eq!(p.focused_pane_id, pane);
+        assert_eq!(p.session.focused, pane);
         let _ = p.focus_neighbor(PaneDir::Left);
-        assert_eq!(p.focused_pane_id, fork);
+        assert_eq!(p.session.focused, fork);
         let _ = p.focus_neighbor(PaneDir::Left);
-        assert_eq!(p.focused_pane_id, pane);
+        assert_eq!(p.session.focused, pane);
 
         // Stack the left pane: vertical wraps hold the column.
         let _ = p.split_pane(pane, SplitDir::Vertical);
-        let bottom = p.focused_pane_id;
+        let bottom = p.session.focused;
         let _ = p.focus_neighbor(PaneDir::Down);
-        assert_eq!(p.focused_pane_id, pane);
+        assert_eq!(p.session.focused, pane);
         let _ = p.focus_neighbor(PaneDir::Up);
-        assert_eq!(p.focused_pane_id, bottom);
+        assert_eq!(p.session.focused, bottom);
     }
 
     #[test]
@@ -582,9 +593,9 @@ mod tests {
             )
         }
         let mut p = player();
-        let pane = p.focused_pane_id;
+        let pane = p.session.focused;
         let _ = p.split_pane(pane, SplitDir::Horizontal);
-        let fork = p.focused_pane_id;
+        let fork = p.session.focused;
         for id in [pane, fork] {
             let _ = p.handle_navigate_to(
                 id,
@@ -596,12 +607,12 @@ mod tests {
         // Hover a row in the unfocused pane: keyboard actions see nothing.
         p.drag
             .set_hovered(HoverTarget::Track(TrackPos::new(2, pane)));
-        assert_eq!(p.focused_pane_id, fork);
+        assert_eq!(p.session.focused, fork);
         assert_eq!(p.focused_hovered_track(), None);
 
         // Ctrl+Arrow back reunites focus and hover on the recalled row.
         let _ = p.focus_neighbor(crate::app::pane::PaneDir::Right);
-        assert_eq!(p.focused_pane_id, pane);
+        assert_eq!(p.session.focused, pane);
         assert_eq!(p.drag.hovered_track(), Some(TrackPos::new(2, pane)));
         assert_eq!(p.focused_hovered_track(), Some(TrackPos::new(2, pane)));
 
@@ -609,7 +620,7 @@ mod tests {
         // stale in the old pane.
         p.view_data_in_mut(fork).set_tracks(Vec::new());
         let _ = p.focus_neighbor(crate::app::pane::PaneDir::Left);
-        assert_eq!(p.focused_pane_id, fork);
+        assert_eq!(p.session.focused, fork);
         assert_eq!(p.drag.hovered_track(), None);
     }
 
@@ -633,7 +644,7 @@ mod tests {
             )
         }
         let mut p = player();
-        let pane = p.focused_pane_id;
+        let pane = p.session.focused;
         let _ = p.handle_navigate_to(
             pane,
             ViewData::new_search(String::new(), ProviderId::YouTube, SearchScope::Songs),
@@ -646,7 +657,7 @@ mod tests {
         p.drag
             .set_hovered(HoverTarget::Track(TrackPos::new(2, pane)));
         let _ = p.split_pane(pane, SplitDir::Horizontal);
-        let fork = p.focused_pane_id;
+        let fork = p.session.focused;
         assert_ne!(fork, pane);
         assert_eq!(p.drag.hovered_track(), Some(TrackPos::new(0, fork)));
         assert_eq!(p.focused_hovered_track(), Some(TrackPos::new(0, fork)));
@@ -663,48 +674,48 @@ mod tests {
     #[test]
     fn pane_cycle_and_jump_follow_leaf_order() {
         let mut p = player();
-        let pane = p.focused_pane_id;
+        let pane = p.session.focused;
         let _ = p.split_pane(pane, SplitDir::Horizontal);
-        let fork = p.focused_pane_id;
+        let fork = p.session.focused;
         assert_ne!(pane, fork);
         let _ = p.focus_next_pane(1);
-        assert_eq!(p.focused_pane_id, pane);
+        assert_eq!(p.session.focused, pane);
         let _ = p.focus_next_pane(-1);
-        assert_eq!(p.focused_pane_id, fork);
+        assert_eq!(p.session.focused, fork);
         let _ = p.focus_pane_at(0);
-        assert_eq!(p.focused_pane_id, pane);
+        assert_eq!(p.session.focused, pane);
         let _ = p.focus_pane_at(1);
-        assert_eq!(p.focused_pane_id, fork);
+        assert_eq!(p.session.focused, fork);
         let _ = p.focus_pane_at(9);
-        assert_eq!(p.focused_pane_id, fork);
+        assert_eq!(p.session.focused, fork);
     }
 
     #[test]
     fn split_cap_and_last_pane_guard() {
         let mut p = player();
         for _ in 0..10 {
-            let pane = p.focused_pane_id;
+            let pane = p.session.focused;
             let _ = p.split_pane(pane, SplitDir::Horizontal);
         }
-        assert_eq!(p.split_root.leaf_count(), crate::app::pane::MAX_PANES);
-        while p.split_root.leaf_count() > 1 {
-            let pane = p.focused_pane_id;
+        assert_eq!(p.session.root.leaf_count(), crate::app::pane::MAX_PANES);
+        while p.session.root.leaf_count() > 1 {
+            let pane = p.session.focused;
             let _ = p.close_pane(pane);
         }
-        assert_eq!(p.split_root.leaf_count(), 1);
-        let last = p.focused_pane_id;
+        assert_eq!(p.session.root.leaf_count(), 1);
+        let last = p.session.focused;
         let _ = p.close_pane(last);
-        assert_eq!(p.split_root.leaf_count(), 1);
-        assert!(p.panes.contains_key(&last));
+        assert_eq!(p.session.root.leaf_count(), 1);
+        assert!(p.session.panes.contains_key(&last));
     }
 
     #[test]
     fn lyrics_fetch_applies_only_to_waiting_provider_pane() {
         use crate::{app::LyricsState, load_state::LoadState, lyrics::LyricsProvider as LP};
         let mut p = player();
-        let pane = p.focused_pane_id;
+        let pane = p.session.focused;
         let _ = p.split_pane(pane, SplitDir::Horizontal);
-        let fork = p.focused_pane_id;
+        let fork = p.session.focused;
         p.pane_mut(pane).lyrics = Some(LyricsState::new(LP::LrcLib));
         p.pane_mut(fork).lyrics = Some(LyricsState::new(LP::LrcMux));
         for id in [pane, fork] {
@@ -750,9 +761,9 @@ mod tests {
             ..Default::default()
         }));
         origin.set_tracks(vec![track.clone()]);
-        p.now_playing_from = Some(origin);
-        p.queue = crate::types::PlayQueue::new();
-        p.queue.set_queue(vec![track], 1000);
+        p.session.now_playing_from = Some(std::sync::Arc::new(origin));
+        p.session.queue = crate::types::PlayQueue::new();
+        p.session.queue.set_queue(vec![track], 1000);
 
         // The live view is a Playlist, so reveal must navigate first.
         assert!(matches!(p.view_data().kind, ViewKind::Playlist(_)));
@@ -761,7 +772,7 @@ mod tests {
         assert!(matches!(p.view_data().kind, ViewKind::SongRadio(_)));
         assert_eq!(
             p.drag.hovered_track(),
-            Some(TrackPos::new(0, p.focused_pane_id))
+            Some(TrackPos::new(0, p.session.focused))
         );
     }
 }

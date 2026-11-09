@@ -105,6 +105,7 @@ impl MusicPlayer {
             dialog.translating = true;
         }
         let track_id = self
+            .session
             .queue
             .current()
             .map(crate::types::Track::cache_key)
@@ -145,7 +146,7 @@ impl MusicPlayer {
         language: &str,
         text: &str,
     ) -> Task<Message> {
-        if !self.panes.contains_key(&pane) {
+        if !self.session.panes.contains_key(&pane) {
             return Task::none();
         }
         let text = text.trim();
@@ -154,6 +155,7 @@ impl MusicPlayer {
             return Task::none();
         }
         let current_id = self
+            .session
             .queue
             .current()
             .map(crate::types::Track::cache_key)

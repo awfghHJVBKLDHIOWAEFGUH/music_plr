@@ -443,25 +443,22 @@ impl From<CardAction> for super::message::Message {
 }
 
 /// The open card context menu. Cards (artists, albums, playlists) have a flat
-/// menu with no provider submenus or multi-selection: `target` is the exact
-/// view the card's click opens, so "Open" lands on the same page and every
-/// other entry reads the card's identity straight off it
-/// ([`ViewKind::library_item`](crate::app::ViewKind::library_item)) — there is
-/// no second copy to fall out of step.
+/// menu with no provider submenus or multi-selection: `target` is the card's
+/// identity, shared with the click path so "Open" lands on the same page and
+/// every other entry reads the card straight off it — there is no second copy
+/// to fall out of step.
 #[derive(Debug, Clone)]
 pub struct CardMenuState {
     pub anchor: MenuAnchor,
     /// Pane the card was right-clicked in (sidebar cards use the focused one).
     pub pane: PaneId,
-    pub target: super::view_data::ViewKind,
+    pub target: super::view_data::CardMenuTarget,
 }
 
 impl CardMenuState {
     /// The card this menu is for.
     pub fn card(&self) -> crate::data::library::CardRef<'_> {
-        self.target
-            .card_ref()
-            .expect("a card menu is only opened on an artist/album/playlist view")
+        self.target.card_ref()
     }
 
     /// Whether this card is already in the library, which decides how
@@ -500,8 +497,8 @@ pub struct CardTarget {
     pub host: crate::app::update::operation::ScrollTarget,
     /// Pane the card belongs to (a sidebar row resolves to the focused pane).
     pub pane: PaneId,
-    /// The exact view the card's click opens.
-    pub target: super::view_data::ViewKind,
+    /// The card identity, and enough to rebuild the exact view a click opens.
+    pub target: super::view_data::CardMenuTarget,
     /// The sideways-scrolling shelf inside `host`, when the card sits in one
     /// (an artist-page section or a Home rail, which shift the cursor too).
     pub rail: Option<crate::app::update::operation::RailKey>,
@@ -818,21 +815,21 @@ mod tests {
         assert_eq!(drag.recall_focus(1), 2);
     }
 
-    /// A card menu over a library item's view, which is how every host builds
-    /// it (`ViewKind::from(&LibraryItem)` is the sidebar/search-card shape).
+    /// A card menu over a library item, which is how every host builds it.
     fn card_menu(kind: LibraryKind, url: &str) -> CardMenuState {
-        use crate::{app::ViewKind, data::library::LibraryItem, providers::ProviderId};
+        use crate::{data::library::LibraryItem, providers::ProviderId};
+        let item = LibraryItem {
+            kind,
+            id: "id".into(),
+            title: "T".into(),
+            thumbnail: String::new(),
+            provider: ProviderId::YouTube,
+            url: url.into(),
+        };
         CardMenuState {
             anchor: MenuAnchor::at(iced::Point::ORIGIN),
             pane: 0,
-            target: ViewKind::from(&LibraryItem {
-                kind,
-                id: "id".into(),
-                title: "T".into(),
-                thumbnail: String::new(),
-                provider: ProviderId::YouTube,
-                url: url.into(),
-            }),
+            target: crate::app::view_data::CardMenuTarget::new(Card::new(item)),
         }
     }
 
@@ -876,7 +873,7 @@ mod tests {
         let menu = card_menu(LibraryKind::Album, "");
         let mut store = LibraryStore::default();
         assert!(!menu.saved(&store));
-        store.add(Card::new(menu.target.library_item().expect("album view")));
+        store.add(menu.target.card.clone());
         assert!(menu.saved(&store));
     }
 

@@ -46,12 +46,8 @@ pub struct AlbumRef {
     pub name: String,
     #[serde(default)]
     pub provider: ProviderId,
-    #[serde(default)]
-    pub badge: String,
-    #[serde(default)]
-    pub date: String,
-    #[serde(default)]
-    pub thumbnail: String,
+    #[serde(flatten)]
+    pub meta: crate::providers::AlbumMeta,
     /// Public page for the album, empty when the provider advertises none.
     #[serde(default)]
     pub url: String,
@@ -97,9 +93,7 @@ pub struct ArtistEntry {
 #[serde(from = "RadioDataCompat")]
 pub struct RadioData {
     pub title: String,
-    #[serde(default)]
     pub thumb_provider: ProviderId,
-    #[serde(default)]
     pub thumb_id: String,
 }
 
@@ -110,13 +104,11 @@ enum RadioDataCompat {
     Legacy(String),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
 struct RadioFields {
-    #[serde(default)]
     title: String,
-    #[serde(default)]
     thumb_provider: ProviderId,
-    #[serde(default)]
     thumb_id: String,
 }
 
@@ -155,10 +147,10 @@ impl From<&LibraryItem> for ViewKind {
     fn from(item: &LibraryItem) -> Self {
         match item.kind {
             LibraryKind::Artist => {
-                let page = Box::new(crate::providers::ArtistPageState::new(
-                    item.provider,
-                    &item.id,
-                ));
+                // A placeholder, not a fetch state: every path that opens a
+                // card rebuilds the page through `open_artist`, so seeding it
+                // here would be discarded. Card hosts run this per frame.
+                let page = Box::new(crate::providers::ArtistPageState::default());
                 ViewKind::Artist(ArtistEntry {
                     url: item.url.clone(),
                     id: item.id.clone(),
@@ -172,9 +164,11 @@ impl From<&LibraryItem> for ViewKind {
                 url: item.url.clone(),
                 id: item.id.clone(),
                 name: item.title.clone(),
-                thumbnail: item.thumbnail.clone(),
                 provider: item.provider,
-                ..Default::default()
+                meta: crate::providers::AlbumMeta {
+                    thumbnail: item.thumbnail.clone(),
+                    ..Default::default()
+                },
             }),
             LibraryKind::Playlist => ViewKind::PlaylistView(PlaylistRef {
                 url: item.url.clone(),
@@ -195,6 +189,49 @@ impl Default for ViewKind {
             tab: crate::providers::SearchTab::Songs,
             ..Default::default()
         })
+    }
+}
+
+/// The identity a card press or right-click carries. It holds the shared
+/// library card (an `Arc`, so cloning is a refcount bump) plus the album
+/// badge/date that only an album page header needs; the `ViewKind` a click
+/// opens is built from it on demand, not once per redraw.
+#[derive(Debug, Clone)]
+pub struct CardMenuTarget {
+    pub card: crate::data::library::Card,
+    pub badge: String,
+    pub date: String,
+}
+
+impl CardMenuTarget {
+    pub fn new(card: crate::data::library::Card) -> Self {
+        Self {
+            card,
+            badge: String::new(),
+            date: String::new(),
+        }
+    }
+
+    pub fn album(card: crate::data::library::Card, badge: &str, date: &str) -> Self {
+        Self {
+            card,
+            badge: badge.to_string(),
+            date: date.to_string(),
+        }
+    }
+
+    pub fn card_ref(&self) -> crate::data::library::CardRef<'_> {
+        self.card.card_ref()
+    }
+
+    /// The view a click on this card opens.
+    pub fn view(&self) -> ViewKind {
+        let mut view = ViewKind::from(self.card.as_ref());
+        if let ViewKind::Album(album) = &mut view {
+            album.meta.badge.clone_from(&self.badge);
+            album.meta.date.clone_from(&self.date);
+        }
+        view
     }
 }
 
@@ -224,7 +261,7 @@ impl ViewKind {
                 provider: r.provider,
                 id: &r.id,
                 title: &r.name,
-                thumbnail: &r.thumbnail,
+                thumbnail: &r.meta.thumbnail,
                 url: &r.url,
             }),
             ViewKind::PlaylistView(r) => Some(CardRef {

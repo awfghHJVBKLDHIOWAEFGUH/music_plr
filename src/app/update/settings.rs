@@ -191,7 +191,7 @@ impl MusicPlayer {
         let id = form
             .id
             .unwrap_or_else(|| self.custom_providers.allocate_id());
-        let kind = form.kind;
+        let kind = form.draft.kind;
         // An edit that switches the backend re-identifies the server, so the
         // state filed under the old identity has to go with it.
         let previous_kind = form.id.and_then(|id| {
@@ -254,14 +254,14 @@ impl MusicPlayer {
         let Some(form) = &mut self.custom_provider_form else {
             return;
         };
-        if form.server_url.trim().is_empty() || form.username.trim().is_empty() {
+        if form.draft.server_url.trim().is_empty() || form.draft.username.trim().is_empty() {
             self.notify_error(self.strings.custom_provider_required);
             return;
         }
-        let kind = form.kind;
-        let server_url = form.server_url.trim().to_string();
-        let username = form.username.trim().to_string();
-        let password = form.password.clone();
+        let kind = form.draft.kind;
+        let server_url = form.draft.server_url.trim().to_string();
+        let username = form.draft.username.trim().to_string();
+        let password = form.draft.password.clone();
         form.test = ConnectionTest::Testing;
         form.test_rid = rid;
 
@@ -335,7 +335,7 @@ impl MusicPlayer {
         let Some(fallback_search) = fallback_search else {
             return;
         };
-        for pane in self.panes.values_mut() {
+        for pane in self.session.panes.values_mut() {
             if !pane.search_provider.capabilities().search || off.contains(&pane.search_provider) {
                 pane.search_provider = fallback_search;
                 if !fallback_search

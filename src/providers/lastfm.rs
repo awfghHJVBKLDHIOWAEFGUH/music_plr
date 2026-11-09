@@ -3,6 +3,7 @@ use std::fmt::Write as _;
 use anyhow::{Context, Result};
 
 use crate::{
+    data::library::LibraryKind,
     providers::{
         AlbumMeta, ArtistAlbumCard, ArtistHeader, ArtistPage, CardData, ProviderId,
         RelatedArtistCard, SearchScope, SearchTab,
@@ -348,12 +349,16 @@ pub fn search(query: &str, scope: SearchScope, offset: usize) -> Result<(Vec<Tra
             let cards = artists
                 .iter()
                 .zip(artist_thumbnails(artists))
-                .map(|(a, thumbnail)| CardData {
-                    url: str_field(a, "url"),
-                    id: str_field(a, "name"),
-                    title: str_field(a, "name"),
-                    subtitle: String::new(),
-                    thumbnail,
+                .map(|(a, thumbnail)| {
+                    CardData::new(
+                        LibraryKind::Artist,
+                        ProviderId::LastFm,
+                        str_field(a, "name"),
+                        str_field(a, "name"),
+                        "",
+                        thumbnail,
+                        str_field(a, "url"),
+                    )
                 })
                 .collect();
             Ok((Vec::new(), SearchTab::Artists(cards)))
@@ -365,12 +370,16 @@ pub fn search(query: &str, scope: SearchScope, offset: usize) -> Result<(Vec<Tra
             )?;
             let cards = collect(&["results", "albummatches", "album"], &v)
                 .iter()
-                .map(|a| CardData {
-                    url: str_field(a, "url"),
-                    id: format!("{}\u{1f}{}", str_field(a, "artist"), str_field(a, "name")),
-                    title: str_field(a, "name"),
-                    subtitle: str_field(a, "artist"),
-                    thumbnail: image_url(a),
+                .map(|a| {
+                    CardData::new(
+                        LibraryKind::Album,
+                        ProviderId::LastFm,
+                        format!("{}\u{1f}{}", str_field(a, "artist"), str_field(a, "name")),
+                        str_field(a, "name"),
+                        str_field(a, "artist"),
+                        image_url(a),
+                        str_field(a, "url"),
+                    )
                 })
                 .collect();
             Ok((Vec::new(), SearchTab::Albums(cards)))
@@ -601,15 +610,15 @@ pub fn home_sections() -> Result<Vec<crate::providers::HomeSection>> {
         .take(24)
         .map(|(artist, thumbnail)| {
             let name = str_field(artist, "name");
-            crate::providers::HomeCard {
-                kind: crate::data::library::LibraryKind::Artist,
-                provider: ProviderId::LastFm,
-                id: name.clone(),
-                title: name,
-                subtitle: String::new(),
+            CardData::new(
+                LibraryKind::Artist,
+                ProviderId::LastFm,
+                name.clone(),
+                name,
+                "",
                 thumbnail,
-                url: str_field(artist, "url"),
-            }
+                str_field(artist, "url"),
+            )
         })
         .collect();
     Ok(super::home::provider_sections(
@@ -643,12 +652,15 @@ pub fn fetch_artist_page(
             page.related = related
                 .iter()
                 .zip(artist_thumbnails(related))
-                .map(|(a, thumbnail)| RelatedArtistCard {
-                    url: str_field(a, "url"),
-                    id: str_field(a, "name"),
-                    name: str_field(a, "name"),
-                    stat: String::new(),
-                    thumbnail,
+                .map(|(a, thumbnail)| {
+                    RelatedArtistCard::new(
+                        ProviderId::LastFm,
+                        str_field(a, "name"),
+                        str_field(a, "name"),
+                        "",
+                        thumbnail,
+                        str_field(a, "url"),
+                    )
                 })
                 .collect();
         }
@@ -669,13 +681,16 @@ pub fn fetch_artist_page(
                     .map(|top| {
                         collect(&["topalbums", "album"], &top)
                             .iter()
-                            .map(|a| ArtistAlbumCard {
-                                url: str_field(a, "url"),
-                                id: format!("{}\u{1f}{}", id, str_field(a, "name")),
-                                title: str_field(a, "name"),
-                                date: String::new(),
-                                badge: "Album".to_string(),
-                                thumbnail: image_url(a),
+                            .map(|a| {
+                                ArtistAlbumCard::new(
+                                    ProviderId::LastFm,
+                                    format!("{}\u{1f}{}", id, str_field(a, "name")),
+                                    str_field(a, "name"),
+                                    "Album",
+                                    "",
+                                    image_url(a),
+                                    str_field(a, "url"),
+                                )
                             })
                             .collect::<Vec<_>>()
                     })

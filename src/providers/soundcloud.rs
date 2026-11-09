@@ -23,19 +23,21 @@ use rsoundcloud::{
 
 use super::ytdlp;
 use crate::{
+    data::library::LibraryKind,
     providers::{ArtistHeader, CardData, ProviderId, SearchScope, SearchTab},
     types::Track,
 };
-impl From<&AlbumPlaylist> for CardData {
-    fn from(ap: &AlbumPlaylist) -> Self {
-        CardData {
-            id: ap.album_playlist.id.to_string(),
-            title: ap.album_playlist.title.clone(),
-            subtitle: ap.user.user.username.clone(),
-            thumbnail: ap.album_playlist.artwork_url.clone().unwrap_or_default(),
-            url: ap.album_playlist.permalink_url.clone(),
-        }
-    }
+
+fn album_playlist_card(ap: &AlbumPlaylist, kind: LibraryKind) -> CardData {
+    CardData::new(
+        kind,
+        ProviderId::SoundCloud,
+        ap.album_playlist.id.to_string(),
+        ap.album_playlist.title.clone(),
+        ap.user.user.username.clone(),
+        ap.album_playlist.artwork_url.clone().unwrap_or_default(),
+        ap.album_playlist.permalink_url.clone(),
+    )
 }
 
 /// A `rsoundcloud` track becomes a playable `Track`. The `permalink_url` +
@@ -64,13 +66,15 @@ impl From<&SCTrack> for Track {
 /// Map an `rsoundcloud` user (artist) into a card for the Artists search tab.
 impl From<&User> for CardData {
     fn from(u: &User) -> Self {
-        CardData {
-            id: u.user.id.to_string(),
-            title: u.user.username.clone(),
-            subtitle: u.user.full_name.clone(),
-            thumbnail: u.user.avatar_url.clone(),
-            url: u.user.permalink_url.clone(),
-        }
+        CardData::new(
+            LibraryKind::Artist,
+            ProviderId::SoundCloud,
+            u.user.id.to_string(),
+            u.user.username.clone(),
+            u.user.full_name.clone(),
+            u.user.avatar_url.clone(),
+            u.user.permalink_url.clone(),
+        )
     }
 }
 
@@ -141,7 +145,7 @@ pub fn home_sections() -> Result<Vec<crate::providers::HomeSection>> {
 fn trending_tracks(limit: usize) -> Result<Vec<Track>> {
     // Populates `CLIENT_ID` on first use (this is the same scrape a search
     // would do).
-    let _ = block_on_sc(async { sc_client().await });
+    let _ = block_on_sc(sc_client());
     let client_id = CLIENT_ID
         .get()
         .cloned()
@@ -245,14 +249,14 @@ pub fn search(query: &str, scope: SearchScope, offset: usize) -> (Vec<Track>, Se
                 (Vec::new(), SearchTab::Artists(Vec::new()))
             }
         },
-        SearchScope::Albums => match search_sets(query, offset, true) {
+        SearchScope::Albums => match search_albums(query, offset) {
             Ok(cards) => (Vec::new(), SearchTab::Albums(cards)),
             Err(e) => {
                 tracing::warn!("SoundCloud album search failed: {e:#}");
                 (Vec::new(), SearchTab::Albums(Vec::new()))
             }
         },
-        SearchScope::Playlists => match search_sets(query, offset, false) {
+        SearchScope::Playlists => match search_playlists(query, offset) {
             Ok(cards) => (Vec::new(), SearchTab::Playlists(cards)),
             Err(e) => {
                 tracing::warn!("SoundCloud playlist search failed: {e:#}");
@@ -291,22 +295,31 @@ fn search_users(query: &str, offset: usize) -> Result<Vec<CardData>> {
     Ok(cards.iter().map(CardData::from).collect())
 }
 
-/// Search albums or playlists (both return the same `AlbumPlaylist` shape and
-/// map through `From<&AlbumPlaylist>`, so they share one body).
-fn search_sets(query: &str, offset: usize, albums: bool) -> Result<Vec<CardData>> {
-    let cards = block_on_sc(async {
+fn search_albums(query: &str, offset: usize) -> Result<Vec<CardData>> {
+    let sets = block_on_sc(async {
         let client = sc_client().await?;
-        if albums {
-            client
-                .search_albums(query.to_string(), search_page(offset))
-                .await
-        } else {
-            client
-                .search_playlists(query.to_string(), search_page(offset))
-                .await
-        }
+        client
+            .search_albums(query.to_string(), search_page(offset))
+            .await
     })?;
-    Ok(cards.iter().map(CardData::from).collect())
+
+    Ok(sets
+        .iter()
+        .map(|item| album_playlist_card(item, LibraryKind::Album))
+        .collect())
+}
+
+fn search_playlists(query: &str, offset: usize) -> Result<Vec<CardData>> {
+    let sets = block_on_sc(async {
+        let client = sc_client().await?;
+        client
+            .search_playlists(query.to_string(), search_page(offset))
+            .await
+    })?;
+    Ok(sets
+        .iter()
+        .map(|item| album_playlist_card(item, LibraryKind::Playlist))
+        .collect())
 }
 
 pub fn search_more(query: &str, offset: usize) -> Vec<Track> {
@@ -368,13 +381,16 @@ async fn album_cards(
         .map_err(|e| anyhow::anyhow!("{e:?}"))?;
     Ok(albums
         .iter()
-        .map(|ap| crate::providers::ArtistAlbumCard {
-            id: ap.album_playlist.id.to_string(),
-            title: ap.album_playlist.title.clone(),
-            date: String::new(),
-            badge: "Album".to_string(),
-            thumbnail: ap.album_playlist.artwork_url.clone().unwrap_or_default(),
-            url: ap.album_playlist.permalink_url.clone(),
+        .map(|ap| {
+            crate::providers::ArtistAlbumCard::new(
+                ProviderId::SoundCloud,
+                ap.album_playlist.id.to_string(),
+                ap.album_playlist.title.clone(),
+                "Album",
+                "",
+                ap.album_playlist.artwork_url.clone().unwrap_or_default(),
+                ap.album_playlist.permalink_url.clone(),
+            )
         })
         .collect())
 }
@@ -385,12 +401,16 @@ async fn playlist_cards(client: &SoundCloudClient, id: u64) -> Result<Vec<CardDa
         .map_err(|e| anyhow::anyhow!("{e:?}"))?;
     Ok(playlists
         .iter()
-        .map(|ap| CardData {
-            id: ap.album_playlist.id.to_string(),
-            title: ap.album_playlist.title.clone(),
-            subtitle: String::new(),
-            thumbnail: ap.album_playlist.artwork_url.clone().unwrap_or_default(),
-            url: ap.album_playlist.permalink_url.clone(),
+        .map(|ap| {
+            CardData::new(
+                LibraryKind::Playlist,
+                ProviderId::SoundCloud,
+                ap.album_playlist.id.to_string(),
+                ap.album_playlist.title.clone(),
+                "",
+                ap.album_playlist.artwork_url.clone().unwrap_or_default(),
+                ap.album_playlist.permalink_url.clone(),
+            )
         })
         .collect())
 }
@@ -406,12 +426,15 @@ async fn related_artists(
     .map_err(|e| anyhow::anyhow!("{e:?}"))?;
     Ok(related
         .iter()
-        .map(|u| crate::providers::RelatedArtistCard {
-            id: u.user.id.to_string(),
-            name: u.user.username.clone(),
-            stat: crate::util::format_count(u.user.followers_count.max(0) as u64),
-            thumbnail: u.user.avatar_url.clone(),
-            url: u.user.permalink_url.clone(),
+        .map(|u| {
+            crate::providers::RelatedArtistCard::new(
+                ProviderId::SoundCloud,
+                u.user.id.to_string(),
+                u.user.username.clone(),
+                crate::util::format_count(u.user.followers_count.max(0) as u64),
+                u.user.avatar_url.clone(),
+                u.user.permalink_url.clone(),
+            )
         })
         .collect())
 }
@@ -422,7 +445,7 @@ pub fn fetch_artist_kinds(
     tx: &std::sync::mpsc::Sender<crate::providers::ArtistKindResult>,
 ) {
     use crate::providers::{
-        ArtistDataKind as K, ArtistKindData as D, ArtistKindResult, ErrorKind, ProviderError,
+        ArtistDataKind as K, ArtistKindResult, ErrorKind, ProviderError, SectionContent as D,
     };
     let Ok(parsed) = id.parse::<u64>() else {
         let msg = format!("Invalid SoundCloud id: {id}");
@@ -449,7 +472,7 @@ pub fn fetch_artist_kinds(
     let _ = block_on_sc(async {
         let mut handles = Vec::new();
         macro_rules! kind_task {
-            ($variant:ident, $kind:expr, $fetch:expr) => {
+            ($kind:expr, $fetch:expr, $map:expr) => {
                 if $kind.wanted(kinds) {
                     let (client, tx) = (client.clone(), tx.clone());
                     let kind = $kind;
@@ -458,7 +481,7 @@ pub fn fetch_artist_kinds(
                         tokio::spawn(async move {
                             let result = $fetch(&client, parsed)
                                 .await
-                                .map(D::$variant)
+                                .map($map)
                                 .map_err(ProviderError::from);
                             let _ = tx.send(ArtistKindResult(kind, result));
                         }),
@@ -466,11 +489,11 @@ pub fn fetch_artist_kinds(
                 }
             };
         }
-        kind_task!(Header, K::Header, header_data);
-        kind_task!(Popular, K::Popular, popular_tracks);
-        kind_task!(Albums, K::Albums, album_cards);
-        kind_task!(Playlists, K::Playlists, playlist_cards);
-        kind_task!(Related, K::Related, related_artists);
+        kind_task!(K::Header, header_data, |header| D::Header(Box::new(header)));
+        kind_task!(K::Popular, popular_tracks, D::Tracks);
+        kind_task!(K::Albums, album_cards, D::Albums);
+        kind_task!(K::Playlists, playlist_cards, D::Playlists);
+        kind_task!(K::Related, related_artists, D::Related);
         for (kind, handle) in handles {
             // A panicked task would otherwise strand its section in Loading.
             if handle.await.is_err() {
@@ -510,7 +533,10 @@ where
 /// Resolve an artist name to a `SoundCloud` user id via user search. Returns
 /// `Ok(None)` when nothing matched.
 pub fn resolve_artist_id(name: &str) -> Result<Option<String>> {
-    Ok(search_users(name, 0)?.into_iter().next().map(|c| c.id))
+    Ok(search_users(name, 0)?
+        .into_iter()
+        .next()
+        .map(|c| c.card.id.clone()))
 }
 
 /// Resolve a logical track to a `SoundCloud` track via search. Returns the

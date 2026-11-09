@@ -139,12 +139,12 @@ impl MusicPlayer {
         if !(s.stream_finished && !s.is_playing && !self.track_loading) {
             return;
         }
-        if self.repeat {
-            if let Some(track) = self.queue.current().cloned() {
+        if self.session.repeat {
+            if let Some(track) = self.session.queue.current().cloned() {
                 self.play_track_internal(&track, track.source);
             }
             self.audio.clear_stream_finished();
-        } else if self.queue.current().is_some() {
+        } else if self.session.queue.current().is_some() {
             self.next_track();
         } else {
             self.audio.clear_stream_finished();
@@ -176,16 +176,18 @@ impl MusicPlayer {
     /// re-scans visibility. Store-backed views (`Playlist`, `Trashbin`) seed
     /// from their store, since their tracks don't live in `ViewData`.
     pub(crate) fn seed_view_thumbnails(&mut self, pane: PaneId, idx: usize) {
-        let Some(view) = self
+        let Some(entry) = self
+            .session
             .panes
             .get_mut(&pane)
             .and_then(|p| p.nav_history.get_mut(idx))
         else {
             return;
         };
-        if view.thumbnails_seeded {
+        if entry.thumbnails_seeded {
             return;
         }
+        let view = std::sync::Arc::make_mut(entry);
         let index = &mut self.thumbnail_index;
         Self::seed_tracks_thumbnails(index, view.tracks());
         match &view.kind {
@@ -198,7 +200,7 @@ impl MusicPlayer {
                 Self::seed_tracks_thumbnails(index, &self.trashbin.tracks);
             }
             ViewKind::Album(r) => {
-                index.ensure(r.provider, &r.id, &r.thumbnail);
+                index.ensure(r.provider, &r.id, &r.meta.thumbnail);
             }
             ViewKind::PlaylistView(r) => {
                 index.ensure(r.provider, &r.id, &r.thumbnail);
@@ -209,7 +211,7 @@ impl MusicPlayer {
                 | SearchTab::Playlists(cards) = &s.tab
                 {
                     for card in cards {
-                        index.ensure(s.provider, &card.id, &card.thumbnail);
+                        index.ensure(card.card.provider, &card.card.id, &card.card.thumbnail);
                     }
                 }
             }
@@ -219,7 +221,7 @@ impl MusicPlayer {
     }
 
     pub(crate) fn seed_active_view_thumbnails(&mut self, pane: PaneId) {
-        let Some(pos) = self.panes.get(&pane).map(|p| p.nav_history_pos) else {
+        let Some(pos) = self.session.panes.get(&pane).map(|p| p.nav_history_pos) else {
             return;
         };
         self.seed_view_thumbnails(pane, pos);
@@ -229,7 +231,7 @@ impl MusicPlayer {
     /// sections, so their artwork is seeded here every tick (the per-view pass
     /// only runs when the view changes, and these rows move under it).
     fn seed_home_row_thumbnails(&mut self) {
-        let shows_home = self.panes.values().any(|pane| {
+        let shows_home = self.session.panes.values().any(|pane| {
             matches!(
                 pane.nav_history
                     .get(pane.nav_history_pos)
@@ -240,7 +242,7 @@ impl MusicPlayer {
         if !shows_home {
             return;
         }
-        for track in &self.queue.recently_played {
+        for track in &self.session.queue.recently_played {
             if !track.thumbnail().is_empty() {
                 self.thumbnail_index
                     .ensure(track.source, track.primary_id(), track.thumbnail());
@@ -274,11 +276,11 @@ impl MusicPlayer {
             }
         }
         let Self {
-            panes,
+            session,
             thumbnail_index,
             ..
         } = self;
-        for pane in panes.values() {
+        for pane in session.panes.values() {
             let Some(view) = pane.nav_history.get(pane.nav_history_pos) else {
                 continue;
             };
@@ -346,7 +348,7 @@ impl MusicPlayer {
             thumbnail,
         } = meta;
         let seed = match &self.pane(pane).nav_history.get(idx).map(|v| &v.kind) {
-            Some(ViewKind::Album(r)) if r.thumbnail.is_empty() && !thumbnail.is_empty() => {
+            Some(ViewKind::Album(r)) if r.meta.thumbnail.is_empty() && !thumbnail.is_empty() => {
                 Some((r.provider, r.id.clone()))
             }
             _ => None,
@@ -354,21 +356,21 @@ impl MusicPlayer {
         if let Some((provider, id)) = seed {
             self.thumbnail_index.ensure(provider, &id, &thumbnail);
         }
-        if let ViewKind::Album(r) = &mut self.pane_mut(pane).nav_history[idx].kind {
-            if r.badge.is_empty() {
-                r.badge = badge;
+        if let ViewKind::Album(r) = &mut self.pane_mut(pane).history_entry_mut(idx).kind {
+            if r.meta.badge.is_empty() {
+                r.meta.badge = badge;
             }
-            if r.date.is_empty() {
-                r.date = date;
+            if r.meta.date.is_empty() {
+                r.meta.date = date;
             }
-            if r.thumbnail.is_empty() && !thumbnail.is_empty() {
-                r.thumbnail = thumbnail;
+            if r.meta.thumbnail.is_empty() && !thumbnail.is_empty() {
+                r.meta.thumbnail = thumbnail;
             }
         }
     }
 
     fn install_results(&mut self, pane: PaneId, idx: usize, tracks: Vec<crate::types::Track>) {
-        let slot = &mut self.pane_mut(pane).nav_history[idx];
+        let slot = self.pane_mut(pane).history_entry_mut(idx);
         slot.set_tracks(tracks);
         slot.selection.clear();
         slot.request_id = 0;
@@ -388,7 +390,7 @@ impl MusicPlayer {
     ) {
         // Apply to the slot that requested this search.
         if let Some((pane, idx)) = self.slot_for_request(rid) {
-            if let ViewKind::Search(s) = &mut self.pane_mut(pane).nav_history[idx].kind {
+            if let ViewKind::Search(s) = &mut self.pane_mut(pane).history_entry_mut(idx).kind {
                 let count = if tab.is_track_tab() {
                     tracks.len()
                 } else {
@@ -636,7 +638,7 @@ impl MusicPlayer {
         error!("Search request {rid} failed: {}", error.detail);
         let reason = self.strings.error_reason_on(provider, error);
         if let Some((pane, idx)) = self.slot_for_request(rid) {
-            let slot = &mut self.pane_mut(pane).nav_history[idx];
+            let slot = self.pane_mut(pane).history_entry_mut(idx);
             slot.request_id = 0;
             if matches!(
                 slot.kind,
@@ -691,7 +693,6 @@ impl MusicPlayer {
         };
         let mut tasks = Vec::new();
         let panes: Vec<PaneId> = self.pane_ids_unsorted();
-        let mut cache = None;
         for pane in panes {
             let waiting = self.pane(pane).lyrics.as_ref().is_some_and(|state| {
                 state.track_id.as_deref() == Some(track_id)
@@ -707,9 +708,6 @@ impl MusicPlayer {
             };
             match &shared {
                 Ok(lyrics) => {
-                    let cache = cache
-                        .get_or_insert_with(crate::data::lyrics_cache::LyricsCache::load_migrated);
-                    cache.insert(track_id, lyrics);
                     let mode = crate::app::LyricsViewMode::for_lyrics(lyrics);
                     state.lyrics = crate::load_state::LoadState::Ready(Arc::clone(lyrics));
                     state.mode = mode;
@@ -727,6 +725,10 @@ impl MusicPlayer {
             state.track_id = Some(track_id.to_owned());
             self.sync_lyrics_editor(pane);
             tasks.push(self.scroll_lyrics_to_active(pane));
+        }
+        if let Ok(lyrics) = &shared {
+            self.lyrics_cache.insert(track_id, lyrics.as_ref().clone());
+            self.lyrics_cache.save();
         }
         if tasks.is_empty() {
             Task::none()
@@ -750,8 +752,8 @@ impl MusicPlayer {
             return Task::none();
         }
         let mut tasks = Vec::new();
+        let mut cache_write: Option<crate::lyrics::Lyrics> = None;
         let panes: Vec<PaneId> = self.pane_ids_unsorted();
-        let mut cache = None;
         for pane in panes {
             let waiting = self.pane(pane).lyrics.as_ref().is_some_and(|state| {
                 state.track_id.as_deref() == Some(track_id)
@@ -802,10 +804,7 @@ impl MusicPlayer {
                         } else {
                             lyrics.translations.push(translation.clone());
                         }
-                        let cache = cache.get_or_insert_with(
-                            crate::data::lyrics_cache::LyricsCache::load_migrated,
-                        );
-                        cache.insert(track_id, lyrics);
+                        cache_write.get_or_insert_with(|| lyrics.clone());
                         state.selected_translation = Some(language.clone());
                         let mode = crate::app::LyricsViewMode::for_lyrics(&translation.lyrics);
                         state.mode = mode;
@@ -825,6 +824,10 @@ impl MusicPlayer {
             if let Some(message) = failure {
                 self.notify_error(message);
             }
+        }
+        if let Some(lyrics) = cache_write {
+            self.lyrics_cache.insert(track_id, lyrics);
+            self.lyrics_cache.save();
         }
         if tasks.is_empty() {
             Task::none()
@@ -857,29 +860,18 @@ impl MusicPlayer {
         track_idx: usize,
         track: crate::types::Track,
     ) {
-        let Some(slot) = self.pane_mut(pane).nav_history.get_mut(history_idx) else {
-            return;
+        let home = {
+            let Some(entry) = self.pane_mut(pane).nav_history.get_mut(history_idx) else {
+                return;
+            };
+            let slot = std::sync::Arc::make_mut(entry);
+            if let Some(t) = slot.tracks_mut().and_then(|ts| ts.get_mut(track_idx)) {
+                *t = track.clone();
+            }
+            super::playback::track_home(&slot.kind)
         };
-        if let Some(t) = slot.tracks_mut().and_then(|ts| ts.get_mut(track_idx)) {
-            *t = track.clone();
-        }
-        match &slot.kind {
-            ViewKind::Playlist(entry) => {
-                let sp = entry.index;
-                if let Some(pl) = self.playlists.playlists.get_mut(sp) {
-                    if let Some(t) = pl.tracks.get_mut(track_idx) {
-                        *t = track;
-                    }
-                }
-                self.playlists.save();
-            }
-            ViewKind::Trashbin => {
-                if let Some(t) = self.trashbin.tracks.get_mut(track_idx) {
-                    *t = track;
-                }
-                self.trashbin.save();
-            }
-            _ => {}
+        if let Some(home) = home {
+            self.mirror_track_into_store(home, track_idx, track);
         }
     }
 
@@ -895,7 +887,7 @@ impl MusicPlayer {
         let exhausted = page < crate::theme::SEARCH_PAGE_SIZE;
         if let Some((pane, idx)) = self.slot_for_request(rid) {
             {
-                let slot = &mut self.pane_mut(pane).nav_history[idx];
+                let slot = self.pane_mut(pane).history_entry_mut(idx);
                 if tab.is_track_tab() {
                     if let Some(existing) = slot.tracks_mut() {
                         existing.extend(tracks);
@@ -1018,7 +1010,7 @@ impl MusicPlayer {
 
     pub fn send_media_update(&self) {
         if let Some(ref tx) = self.media_update_tx {
-            let track = self.queue.current();
+            let track = self.session.queue.current();
             let update = MediaUpdate {
                 playback: if self.is_playing {
                     MediaPlayback::Playing { progress: None }

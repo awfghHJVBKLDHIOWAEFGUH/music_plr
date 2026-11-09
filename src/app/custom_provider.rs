@@ -30,11 +30,8 @@ pub enum ConnectionTest {
 pub struct CustomProviderForm {
     /// `Some(id)` while editing an existing provider, `None` while adding.
     pub id: Option<u64>,
-    pub name: String,
-    pub kind: CustomProviderKind,
-    pub server_url: String,
-    pub username: String,
-    pub password: String,
+    /// The provider being edited: every field the persisted entry carries.
+    pub draft: CustomProvider,
     pub test: ConnectionTest,
     /// Request id of the in-flight test, so a late reply from a previous form
     /// cannot overwrite the current one.
@@ -45,11 +42,14 @@ impl Default for CustomProviderForm {
     fn default() -> Self {
         Self {
             id: None,
-            name: String::new(),
-            kind: CustomProviderKind::default(),
-            server_url: String::new(),
-            username: String::new(),
-            password: String::new(),
+            draft: CustomProvider {
+                id: 0,
+                name: String::new(),
+                kind: CustomProviderKind::default(),
+                server_url: String::new(),
+                username: String::new(),
+                password: String::new(),
+            },
             test: ConnectionTest::Idle,
             test_rid: 0,
         }
@@ -60,11 +60,7 @@ impl From<&CustomProvider> for CustomProviderForm {
     fn from(provider: &CustomProvider) -> Self {
         Self {
             id: Some(provider.id),
-            name: provider.name.clone(),
-            kind: provider.kind,
-            server_url: provider.server_url.clone(),
-            username: provider.username.clone(),
-            password: provider.password.clone(),
+            draft: provider.clone(),
             test: ConnectionTest::Idle,
             test_rid: 0,
         }
@@ -74,16 +70,16 @@ impl From<&CustomProvider> for CustomProviderForm {
 impl CustomProviderForm {
     pub fn set_field(&mut self, field: CustomProviderField, value: String) {
         match field {
-            CustomProviderField::Name => self.name = value,
-            CustomProviderField::ServerUrl => self.server_url = value,
-            CustomProviderField::Username => self.username = value,
-            CustomProviderField::Password => self.password = value,
+            CustomProviderField::Name => self.draft.name = value,
+            CustomProviderField::ServerUrl => self.draft.server_url = value,
+            CustomProviderField::Username => self.draft.username = value,
+            CustomProviderField::Password => self.draft.password = value,
         }
         self.clear_test();
     }
 
     pub fn set_kind(&mut self, kind: CustomProviderKind) {
-        self.kind = kind;
+        self.draft.kind = kind;
         self.clear_test();
     }
 
@@ -92,22 +88,23 @@ impl CustomProviderForm {
         self.test_rid = 0;
     }
 
-    pub fn into_provider(self, id: u64) -> CustomProvider {
-        CustomProvider {
-            id,
-            name: self.name.trim().to_string(),
-            kind: self.kind,
-            server_url: self.server_url.trim().to_string(),
-            username: self.username.trim().to_string(),
-            password: self.password,
-        }
+    pub fn into_provider(mut self, id: u64) -> CustomProvider {
+        self.draft.id = id;
+        self.draft.name = self.draft.name.trim().to_string();
+        self.draft.server_url = self.draft.server_url.trim().to_string();
+        self.draft.username = self.draft.username.trim().to_string();
+        self.draft
     }
 
     /// `None` when the required fields are blank.
     pub fn validated(&self) -> Option<()> {
-        let filled = [&self.name, &self.server_url, &self.username]
-            .iter()
-            .all(|field| !field.trim().is_empty());
+        let filled = [
+            &self.draft.name,
+            &self.draft.server_url,
+            &self.draft.username,
+        ]
+        .iter()
+        .all(|field| !field.trim().is_empty());
         filled.then_some(())
     }
 }
@@ -120,11 +117,11 @@ mod tests {
     fn required_fields_are_trimmed_and_checked() {
         let mut form = CustomProviderForm::default();
         assert!(form.validated().is_none());
-        form.name = "  ".into();
-        form.server_url = "http://localhost:4533".into();
-        form.username = "admin".into();
+        form.draft.name = "  ".into();
+        form.draft.server_url = "http://localhost:4533".into();
+        form.draft.username = "admin".into();
         assert!(form.validated().is_none());
-        form.name = " Home ".into();
+        form.draft.name = " Home ".into();
         assert!(form.validated().is_some());
 
         let provider = form.into_provider(7);

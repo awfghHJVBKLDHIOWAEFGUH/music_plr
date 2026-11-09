@@ -399,9 +399,13 @@ fn custom_provider_form<'a>(
     } else {
         tr.custom_provider_add
     };
-    let name = text_input_row(dir, tr.custom_provider_name_lbl, &form.name, "", |value| {
-        Message::CustomProviderField(CustomProviderField::Name, value)
-    });
+    let name = text_input_row(
+        dir,
+        tr.custom_provider_name_lbl,
+        &form.draft.name,
+        "",
+        |value| Message::CustomProviderField(CustomProviderField::Name, value),
+    );
     let kind = Column::with_children([
         text(tr.custom_provider_type_lbl).into(),
         scope_tab_row(
@@ -409,7 +413,7 @@ fn custom_provider_form<'a>(
             CustomProviderKind::ALL.iter().map(|&kind| {
                 (
                     kind.label(),
-                    form.kind == kind,
+                    form.draft.kind == kind,
                     Message::CustomProviderKindChanged(kind),
                 )
             }),
@@ -420,14 +424,14 @@ fn custom_provider_form<'a>(
     let server_url = text_input_row(
         dir,
         tr.custom_provider_url_lbl,
-        &form.server_url,
+        &form.draft.server_url,
         "https://music.example.com",
         |value| Message::CustomProviderField(CustomProviderField::ServerUrl, value),
     );
     let username = text_input_row(
         dir,
         tr.custom_provider_username_lbl,
-        &form.username,
+        &form.draft.username,
         "",
         |value| Message::CustomProviderField(CustomProviderField::Username, value),
     );
@@ -435,7 +439,7 @@ fn custom_provider_form<'a>(
         Container::new(text(tr.custom_provider_password_lbl))
             .padding([0.0, theme::SPACING_XS])
             .into(),
-        text_input("", &form.password)
+        text_input("", &form.draft.password)
             .secure(true)
             .align_x(dir.align())
             .on_input(|value| Message::CustomProviderField(CustomProviderField::Password, value))

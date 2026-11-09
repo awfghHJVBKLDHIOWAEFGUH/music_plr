@@ -14,7 +14,10 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 
 use crate::{
-    data::custom_providers::{self, CustomProvider, CustomProviderKind},
+    data::{
+        custom_providers::{self, CustomProvider, CustomProviderKind},
+        library::LibraryKind,
+    },
     providers::{
         download_file_path, http_agent, AlbumMeta, ArtistAlbumCard, ArtistDataKind, ArtistHeader,
         ArtistPage, CardData, PlaylistWrite, ProviderId, RelatedArtistCard, SearchScope, SearchTab,
@@ -482,26 +485,38 @@ fn track_from_item(
     )
 }
 
-fn artist_card(config: &CustomProvider, session: &Session, item: &ItemDto) -> CardData {
-    CardData {
-        id: item.id.clone(),
-        title: item.name.clone(),
-        subtitle: item
-            .album_count
+fn artist_card(
+    config: &CustomProvider,
+    session: &Session,
+    provider: ProviderId,
+    item: &ItemDto,
+) -> CardData {
+    CardData::new(
+        LibraryKind::Artist,
+        provider,
+        item.id.clone(),
+        item.name.clone(),
+        item.album_count
             .filter(|count| *count > 0)
             .map(|count| format!("{count} albums"))
             .unwrap_or_default(),
-        thumbnail: own_image(config, session, item),
-        url: String::new(),
-    }
+        own_image(config, session, item),
+        "",
+    )
 }
 
-fn album_card(config: &CustomProvider, session: &Session, item: &ItemDto) -> CardData {
-    CardData {
-        id: item.id.clone(),
-        title: item.name.clone(),
-        subtitle: item
-            .album_artist
+fn album_card(
+    config: &CustomProvider,
+    session: &Session,
+    provider: ProviderId,
+    item: &ItemDto,
+) -> CardData {
+    CardData::new(
+        LibraryKind::Album,
+        provider,
+        item.id.clone(),
+        item.name.clone(),
+        item.album_artist
             .clone()
             .or_else(|| {
                 item.artists
@@ -509,9 +524,9 @@ fn album_card(config: &CustomProvider, session: &Session, item: &ItemDto) -> Car
                     .and_then(|artists| artists.first().cloned())
             })
             .unwrap_or_default(),
-        thumbnail: own_image(config, session, item),
-        url: String::new(),
-    }
+        own_image(config, session, item),
+        "",
+    )
 }
 
 /// Home rows: the server's recently added, recently played, most played and
@@ -556,13 +571,7 @@ pub fn home_sections(provider: ProviderId) -> Result<Vec<crate::providers::HomeS
         };
         let cards = items
             .iter()
-            .map(|item| {
-                crate::providers::HomeCard::new(
-                    crate::data::library::LibraryKind::Album,
-                    provider,
-                    album_card(&config, &session, item),
-                )
-            })
+            .map(|item| album_card(&config, &session, provider, item))
             .collect();
         rows.push((kind, crate::providers::HomeSectionData::Cards(cards)));
     }
@@ -580,13 +589,7 @@ pub fn home_sections(provider: ProviderId) -> Result<Vec<crate::providers::HomeS
     };
     let cards = artists
         .iter()
-        .map(|item| {
-            crate::providers::HomeCard::new(
-                crate::data::library::LibraryKind::Artist,
-                provider,
-                artist_card(&config, &session, item),
-            )
-        })
+        .map(|item| artist_card(&config, &session, provider, item))
         .collect();
     rows.push((
         crate::providers::HomeSectionKind::Artists,
@@ -595,33 +598,44 @@ pub fn home_sections(provider: ProviderId) -> Result<Vec<crate::providers::HomeS
     Ok(super::home::provider_sections(provider, rows))
 }
 
-fn playlist_card(config: &CustomProvider, session: &Session, item: &ItemDto) -> CardData {
-    CardData {
-        id: item.id.clone(),
-        title: item.name.clone(),
-        subtitle: item
-            .child_count
+fn playlist_card(
+    config: &CustomProvider,
+    session: &Session,
+    provider: ProviderId,
+    item: &ItemDto,
+) -> CardData {
+    CardData::new(
+        LibraryKind::Playlist,
+        provider,
+        item.id.clone(),
+        item.name.clone(),
+        item.child_count
             .filter(|count| *count > 0)
             .map(|count| format!("{count} songs"))
             .unwrap_or_default(),
-        thumbnail: own_image(config, session, item),
-        url: String::new(),
-    }
+        own_image(config, session, item),
+        "",
+    )
 }
 
 /// Playlist cards with an artwork fallback: a Jellyfin playlist usually owns no
 /// image of its own, so it borrows its first track's (which itself falls back to
 /// the album's). Only the cards still missing art cost a request, and they run
 /// in parallel, so a page of them adds one round-trip instead of one per card.
-fn playlist_cards(config: &CustomProvider, session: &Session, items: &[ItemDto]) -> Vec<CardData> {
+fn playlist_cards(
+    config: &CustomProvider,
+    session: &Session,
+    provider: ProviderId,
+    items: &[ItemDto],
+) -> Vec<CardData> {
     let mut cards: Vec<CardData> = items
         .iter()
-        .map(|item| playlist_card(config, session, item))
+        .map(|item| playlist_card(config, session, provider, item))
         .collect();
     let missing: Vec<usize> = cards
         .iter()
         .enumerate()
-        .filter(|(_, card)| card.thumbnail.is_empty())
+        .filter(|(_, card)| card.card.thumbnail.is_empty())
         .map(|(index, _)| index)
         .collect();
     if missing.is_empty() {
@@ -651,7 +665,9 @@ fn playlist_cards(config: &CustomProvider, session: &Session, items: &[ItemDto])
             continue;
         }
         if let Some(card) = cards.get_mut(index) {
-            card.thumbnail = thumbnail;
+            let mut item = (*card.card).clone();
+            item.thumbnail = thumbnail;
+            card.card = std::sync::Arc::new(item);
         }
     }
     cards
@@ -720,7 +736,7 @@ pub fn search(
                 SearchTab::Artists(
                     items
                         .iter()
-                        .map(|item| artist_card(&config, &session, item))
+                        .map(|item| artist_card(&config, &session, provider, item))
                         .collect(),
                 ),
             ))
@@ -745,7 +761,7 @@ pub fn search(
                 SearchTab::Albums(
                     items
                         .iter()
-                        .map(|item| album_card(&config, &session, item))
+                        .map(|item| album_card(&config, &session, provider, item))
                         .collect(),
                 ),
             ))
@@ -762,7 +778,7 @@ pub fn search(
             )?;
             Ok((
                 Vec::new(),
-                SearchTab::Playlists(playlist_cards(&config, &session, &items)),
+                SearchTab::Playlists(playlist_cards(&config, &session, provider, &items)),
             ))
         }
         SearchScope::Videos => Ok((Vec::new(), SearchTab::Videos)),
@@ -1249,16 +1265,18 @@ pub fn fetch_artist_page(
         page.albums = albums
             .unwrap_or_default()
             .iter()
-            .map(|item| ArtistAlbumCard {
-                id: item.id.clone(),
-                title: item.name.clone(),
-                date: item
-                    .production_year
-                    .map(|year| year.to_string())
-                    .unwrap_or_default(),
-                badge: "Album".to_string(),
-                thumbnail: own_image(&config, &session, item),
-                url: String::new(),
+            .map(|item| {
+                ArtistAlbumCard::new(
+                    provider,
+                    item.id.clone(),
+                    item.name.clone(),
+                    "Album",
+                    item.production_year
+                        .map(|year| year.to_string())
+                        .unwrap_or_default(),
+                    own_image(&config, &session, item),
+                    "",
+                )
             })
             .collect();
     }
@@ -1266,6 +1284,7 @@ pub fn fetch_artist_page(
         page.playlists = playlist_cards(
             &config,
             &session,
+            provider,
             &fetch_items(
                 &config,
                 &session,
@@ -1287,12 +1306,15 @@ pub fn fetch_artist_page(
         page.related = result
             .items
             .iter()
-            .map(|item| RelatedArtistCard {
-                id: item.id.clone(),
-                name: item.name.clone(),
-                stat: String::new(),
-                thumbnail: own_image(&config, &session, item),
-                url: String::new(),
+            .map(|item| {
+                RelatedArtistCard::new(
+                    provider,
+                    item.id.clone(),
+                    item.name.clone(),
+                    "",
+                    own_image(&config, &session, item),
+                    "",
+                )
             })
             .collect();
     }

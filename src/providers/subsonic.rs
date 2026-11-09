@@ -12,7 +12,10 @@ use opensubsonic::{
 };
 
 use crate::{
-    data::custom_providers::{self, CustomProvider, CustomProviderKind},
+    data::{
+        custom_providers::{self, CustomProvider, CustomProviderKind},
+        library::LibraryKind,
+    },
     providers::{
         download_file_path, shared_runtime, AlbumMeta, ArtistAlbumCard, ArtistDataKind,
         ArtistHeader, ArtistPage, CardData, ErrorKind, PlaylistWrite, ProviderId,
@@ -121,27 +124,39 @@ fn track_from_child(
     )
 }
 
-fn artist_card(client: &Client, artist: &opensubsonic::data::ArtistId3) -> CardData {
-    CardData {
-        id: artist.id.clone(),
-        title: artist.name.clone(),
-        subtitle: artist
+fn artist_card(
+    client: &Client,
+    provider: ProviderId,
+    artist: &opensubsonic::data::ArtistId3,
+) -> CardData {
+    CardData::new(
+        LibraryKind::Artist,
+        provider,
+        artist.id.clone(),
+        artist.name.clone(),
+        artist
             .album_count
             .map(|count| format!("{count} albums"))
             .unwrap_or_default(),
-        thumbnail: cover_url(client, artist.cover_art.as_deref()),
-        url: String::new(),
-    }
+        cover_url(client, artist.cover_art.as_deref()),
+        "",
+    )
 }
 
-fn album_card(client: &Client, album: &opensubsonic::data::AlbumId3) -> CardData {
-    CardData {
-        id: album.id.clone(),
-        title: album.name.clone(),
-        subtitle: album.artist.clone().unwrap_or_default(),
-        thumbnail: cover_url(client, album.cover_art.as_deref()),
-        url: String::new(),
-    }
+fn album_card(
+    client: &Client,
+    provider: ProviderId,
+    album: &opensubsonic::data::AlbumId3,
+) -> CardData {
+    CardData::new(
+        LibraryKind::Album,
+        provider,
+        album.id.clone(),
+        album.name.clone(),
+        album.artist.clone().unwrap_or_default(),
+        cover_url(client, album.cover_art.as_deref()),
+        "",
+    )
 }
 
 fn album_list(client: &Client, list_type: AlbumListType) -> Vec<opensubsonic::data::AlbumId3> {
@@ -153,16 +168,10 @@ fn album_cards(
     client: &Client,
     provider: ProviderId,
     albums: &[opensubsonic::data::AlbumId3],
-) -> Vec<crate::providers::HomeCard> {
+) -> Vec<CardData> {
     albums
         .iter()
-        .map(|album| {
-            crate::providers::HomeCard::new(
-                crate::data::library::LibraryKind::Album,
-                provider,
-                album_card(client, album),
-            )
-        })
+        .map(|album| album_card(client, provider, album))
         .collect()
 }
 
@@ -184,7 +193,7 @@ fn shuffle<T>(items: &mut [T]) {
 
 /// Artist cards from the server's artist index, in a shuffled order so the row
 /// isn't permanently stuck on the first page of an alphabetical list.
-fn artist_cards(client: &Client, provider: ProviderId) -> Vec<crate::providers::HomeCard> {
+fn artist_cards(client: &Client, provider: ProviderId) -> Vec<CardData> {
     let Ok(artists) = block_on(client.get_artists(None)) else {
         return Vec::new();
     };
@@ -197,13 +206,7 @@ fn artist_cards(client: &Client, provider: ProviderId) -> Vec<crate::providers::
     artists
         .iter()
         .take(20)
-        .map(|artist| {
-            crate::providers::HomeCard::new(
-                crate::data::library::LibraryKind::Artist,
-                provider,
-                artist_card(client, artist),
-            )
-        })
+        .map(|artist| artist_card(client, provider, artist))
         .collect()
 }
 
@@ -251,17 +254,23 @@ pub fn home_sections(provider: ProviderId) -> Result<Vec<crate::providers::HomeS
     Ok(super::home::provider_sections(provider, rows))
 }
 
-fn playlist_card(client: &Client, playlist: &opensubsonic::data::Playlist) -> CardData {
-    CardData {
-        id: playlist.id.clone(),
-        title: playlist.name.clone(),
-        subtitle: playlist
+fn playlist_card(
+    client: &Client,
+    provider: ProviderId,
+    playlist: &opensubsonic::data::Playlist,
+) -> CardData {
+    CardData::new(
+        LibraryKind::Playlist,
+        provider,
+        playlist.id.clone(),
+        playlist.name.clone(),
+        playlist
             .song_count
             .map(|count| format!("{count} songs"))
             .unwrap_or_default(),
-        thumbnail: cover_url(client, playlist.cover_art.as_deref()),
-        url: String::new(),
-    }
+        cover_url(client, playlist.cover_art.as_deref()),
+        "",
+    )
 }
 
 fn search_artists(
@@ -333,7 +342,7 @@ pub fn search(
                 SearchTab::Artists(
                     artists
                         .iter()
-                        .map(|artist| artist_card(&client, artist))
+                        .map(|artist| artist_card(&client, provider, artist))
                         .collect(),
                 ),
             ))
@@ -360,7 +369,7 @@ pub fn search(
                 SearchTab::Albums(
                     albums
                         .iter()
-                        .map(|album| album_card(&client, album))
+                        .map(|album| album_card(&client, provider, album))
                         .collect(),
                 ),
             ))
@@ -376,7 +385,7 @@ pub fn search(
                         .filter(|playlist| blank || playlist.name.to_lowercase().contains(&needle))
                         .skip(offset.max(0) as usize)
                         .take(PAGE_SIZE as usize)
-                        .map(|playlist| playlist_card(&client, playlist))
+                        .map(|playlist| playlist_card(&client, provider, playlist))
                         .collect(),
                 ),
             ))
@@ -675,13 +684,16 @@ pub fn fetch_artist_page(
             page.albums = artist
                 .album
                 .iter()
-                .map(|album| ArtistAlbumCard {
-                    id: album.id.clone(),
-                    title: album.name.clone(),
-                    date: album.year.map(|year| year.to_string()).unwrap_or_default(),
-                    badge: "Album".to_string(),
-                    thumbnail: cover_url(&client, album.cover_art.as_deref()),
-                    url: String::new(),
+                .map(|album| {
+                    ArtistAlbumCard::new(
+                        provider,
+                        album.id.clone(),
+                        album.name.clone(),
+                        "Album",
+                        album.year.map(|year| year.to_string()).unwrap_or_default(),
+                        cover_url(&client, album.cover_art.as_deref()),
+                        "",
+                    )
                 })
                 .collect();
         }
@@ -690,7 +702,7 @@ pub fn fetch_artist_page(
     if ArtistDataKind::Playlists.wanted(kinds) {
         page.playlists = block_on(client.get_playlists(None))?
             .iter()
-            .map(|playlist| playlist_card(&client, playlist))
+            .map(|playlist| playlist_card(&client, provider, playlist))
             .collect();
     }
     if ArtistDataKind::Related.wanted(kinds) {
@@ -699,12 +711,15 @@ pub fn fetch_artist_page(
             .map_or(&[][..], |info| info.similar_artist.as_slice())
             .iter()
             .take(10)
-            .map(|artist| RelatedArtistCard {
-                id: artist.id.clone(),
-                name: artist.name.clone(),
-                stat: String::new(),
-                thumbnail: cover_url(&client, artist.cover_art.as_deref()),
-                url: String::new(),
+            .map(|artist| {
+                RelatedArtistCard::new(
+                    provider,
+                    artist.id.clone(),
+                    artist.name.clone(),
+                    "",
+                    cover_url(&client, artist.cover_art.as_deref()),
+                    "",
+                )
             })
             .collect();
     }

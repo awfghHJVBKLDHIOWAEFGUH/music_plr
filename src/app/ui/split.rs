@@ -51,8 +51,8 @@ pub(super) fn view_split_tree<'a>(
 }
 
 fn view_pane(player: &MusicPlayer, pane: PaneId) -> Element<'_, Message, AppTheme> {
-    let multi = player.split_root.leaf_count() > 1;
-    let focused = multi && player.focused_pane_id == pane;
+    let multi = player.session.root.leaf_count() > 1;
+    let focused = multi && player.session.focused == pane;
     let mut children = Vec::with_capacity(2);
     if multi {
         children.push(view_pane_header(player, pane));
@@ -61,7 +61,7 @@ fn view_pane(player: &MusicPlayer, pane: PaneId) -> Element<'_, Message, AppThem
 
     let body = Column::with_children(children);
     let mut content = MouseArea::new(body);
-    if player.focused_pane_id != pane {
+    if player.session.focused != pane {
         content = content.on_press(Message::FocusPane(pane));
         if !player.drag.is_hover_controlled {
             content = content.on_enter(Message::FocusPane(pane));

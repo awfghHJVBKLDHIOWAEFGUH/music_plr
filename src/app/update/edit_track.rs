@@ -346,7 +346,7 @@ mod tests {
     fn editing_player() -> MusicPlayer {
         let mut p = MusicPlayer::new_with(config::Config::default());
         p.reset_test_pane(vec![ViewData::default()]);
-        p.queue.tracks = vec![result_track(
+        p.session.queue.tracks = vec![result_track(
             ProviderId::YouTube,
             "old",
             "Old Title",
@@ -500,7 +500,7 @@ mod tests {
     #[test]
     fn confirming_fills_fields_that_are_still_blank() {
         let mut p = MusicPlayer::new_with(config::Config::default());
-        p.queue.tracks = vec![Track::default()];
+        p.session.queue.tracks = vec![Track::default()];
         p.open_edit_track(TrackPos::new(0, QUEUE_PANE_ID));
         p.edit_dialog_mut().unwrap().title = String::new();
         p.edit_dialog_mut().unwrap().artist = "Kept".into();
@@ -573,8 +573,11 @@ mod tests {
             MANUAL_SEARCH_PANE_ID,
         )));
 
-        assert_eq!(p.queue.tracks.len(), 2);
-        assert_eq!(p.queue.current().map(|t| t.title.as_str()), Some("Second"));
+        assert_eq!(p.session.queue.tracks.len(), 2);
+        assert_eq!(
+            p.session.queue.current().map(|t| t.title.as_str()),
+            Some("Second")
+        );
         // The step is untouched: the result can still be picked afterwards.
         assert!(p.edit_manual_open());
         assert!(p.selection_in(MANUAL_SEARCH_PANE_ID).is_empty());
@@ -713,7 +716,7 @@ mod tests {
     fn saving_a_multi_artist_line_keeps_the_ids_of_artists_that_stay() {
         let mut p = MusicPlayer::new_with(config::Config::default());
         p.reset_test_pane(vec![ViewData::default()]);
-        p.queue.tracks = vec![Track::from_provider_artists(
+        p.session.queue.tracks = vec![Track::from_provider_artists(
             ProviderId::YouTube,
             "a".into(),
             "https://example.com/a".into(),
@@ -729,7 +732,7 @@ mod tests {
 
         p.apply_edit_track();
 
-        let track = &p.queue.tracks[0];
+        let track = &p.session.queue.tracks[0];
         assert_eq!(track.artists, ["B", "A", "C"]);
         assert_eq!(
             track.provider_artist_ids(ProviderId::YouTube),

@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 use super::{
     album_page_url, artist_page_url, artist_pairs, build_track, clean_home_subtitle, is_video_id,
-    parse_abbreviated_count, parse_duration_text, playlist_page_url, CardData, HomeCard,
-    LibraryKind, MusicArtistRef, ProviderId, Track, TrackAlbum, Value,
+    parse_abbreviated_count, parse_duration_text, playlist_page_url, CardData, LibraryKind,
+    MusicArtistRef, ProviderId, Track, TrackAlbum, Value,
 };
 
 pub(super) fn text_value(value: &Value) -> String {
@@ -401,7 +401,7 @@ pub(super) fn playlist_browse_id(id: &str) -> String {
     format!("VL{}", normalize_playlist_id(id))
 }
 
-pub(super) fn two_row_card(card: &Value) -> Option<(LibraryKind, CardData)> {
+pub(super) fn two_row_card(card: &Value) -> Option<CardData> {
     let browse = card.pointer("/navigationEndpoint/browseEndpoint")?;
     let raw_id = browse.get("browseId").and_then(Value::as_str)?;
     if raw_id.is_empty() {
@@ -441,15 +441,14 @@ pub(super) fn two_row_card(card: &Value) -> Option<(LibraryKind, CardData)> {
         LibraryKind::Artist => artist_page_url(id),
         LibraryKind::Playlist => playlist_page_url(id),
     };
-    Some((
+    Some(CardData::new(
         kind,
-        CardData {
-            id: id.to_string(),
-            title,
-            subtitle,
-            thumbnail: card_thumbnail(card),
-            url,
-        },
+        ProviderId::YouTube,
+        id.to_string(),
+        title,
+        subtitle,
+        card_thumbnail(card),
+        url,
     ))
 }
 
@@ -465,13 +464,15 @@ pub(super) fn playlist_card_from_artist_shelf(item: &Value) -> Option<CardData> 
         return None;
     }
     let subtitle = item.get("subtitle").map(text_value).unwrap_or_default();
-    Some(CardData {
-        url: playlist_page_url(id),
-        id: id.to_string(),
+    Some(CardData::new(
+        LibraryKind::Playlist,
+        ProviderId::YouTube,
+        id.to_string(),
         title,
-        subtitle: clean_home_subtitle(&subtitle),
-        thumbnail: card_thumbnail(item),
-    })
+        clean_home_subtitle(&subtitle),
+        card_thumbnail(item),
+        playlist_page_url(id),
+    ))
 }
 
 pub(super) fn raw_artist_playlist_cards(value: &Value) -> Vec<CardData> {
@@ -498,7 +499,7 @@ pub(super) fn collect_artist_playlist_cards(value: &Value, out: &mut Vec<CardDat
                             else {
                                 continue;
                             };
-                            if !out.iter().any(|existing| existing.id == card.id) {
+                            if !out.iter().any(|existing| existing.card.id == card.card.id) {
                                 out.push(card);
                             }
                         }
@@ -539,13 +540,15 @@ pub(super) fn raw_chart_artist_cards(value: &Value) -> Vec<CardData> {
             } else {
                 format!("#{rank}")
             };
-            Some(CardData {
-                id: id.to_string(),
+            Some(CardData::new(
+                LibraryKind::Artist,
+                ProviderId::YouTube,
+                id.to_string(),
                 title,
                 subtitle,
-                thumbnail: raw_row_thumbnail(row),
-                url: artist_page_url(id),
-            })
+                raw_row_thumbnail(row),
+                artist_page_url(id),
+            ))
         })
         .collect()
 }
@@ -563,7 +566,7 @@ pub(super) fn browse_sections(value: &Value) -> Option<&[Value]> {
 pub(super) struct HomeShelf {
     pub(super) title: String,
     pub(super) tracks: Vec<Track>,
-    pub(super) cards: Vec<HomeCard>,
+    pub(super) cards: Vec<CardData>,
 }
 
 pub(super) fn raw_home_shelves(value: &Value) -> Vec<HomeShelf> {
@@ -597,8 +600,8 @@ pub(super) fn raw_home_shelves(value: &Value) -> Vec<HomeShelf> {
                 } else if let Some(card) = item.get("musicTwoRowItemRenderer") {
                     if let Some(track) = track_from_two_row(card, &[]) {
                         tracks.push(track);
-                    } else if let Some((kind, card)) = two_row_card(card) {
-                        cards.push(HomeCard::new(kind, ProviderId::YouTube, card));
+                    } else if let Some(card) = two_row_card(card) {
+                        cards.push(card);
                     }
                 }
             }
@@ -656,8 +659,7 @@ pub(super) fn explore_album_cards(value: &Value) -> Vec<CardData> {
     collect_two_row_cards(value)
         .into_iter()
         .filter_map(two_row_card)
-        .filter(|(kind, _)| *kind == LibraryKind::Album)
-        .map(|(_, card)| card)
+        .filter(|card| card.card.kind == LibraryKind::Album)
         .collect()
 }
 
@@ -824,9 +826,9 @@ mod tests {
         });
         let cards = raw_chart_artist_cards(&value);
         assert_eq!(cards.len(), 1);
-        assert_eq!(cards[0].title, "Rick Astley");
+        assert_eq!(cards[0].card.title, "Rick Astley");
         assert_eq!(cards[0].subtitle, "#1");
-        assert_eq!(cards[0].id, "UCwZEU0wAwIyZb4x5G_KJp2w");
+        assert_eq!(cards[0].card.id, "UCwZEU0wAwIyZb4x5G_KJp2w");
     }
 
     #[test]
@@ -957,12 +959,12 @@ mod tests {
         });
         let cards = raw_artist_playlist_cards(&value);
         assert_eq!(cards.len(), 1);
-        assert_eq!(cards[0].id, "PL123");
-        assert_eq!(cards[0].title, "Rick Astley - Whenever");
+        assert_eq!(cards[0].card.id, "PL123");
+        assert_eq!(cards[0].card.title, "Rick Astley - Whenever");
         assert_eq!(cards[0].subtitle, "Rick Astley");
-        assert_eq!(cards[0].thumbnail, "thumb");
+        assert_eq!(cards[0].card.thumbnail, "thumb");
         assert_eq!(
-            cards[0].url,
+            cards[0].card.url,
             "https://music.youtube.com/playlist?list=PL123"
         );
     }

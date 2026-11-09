@@ -81,8 +81,8 @@ impl MusicPlayer {
                     self.toggle_selection(pos);
                 }
                 Pressed::Card(item, pane) => {
-                    let target = pane.unwrap_or(self.focused_pane_id);
-                    self.focused_pane_id = target;
+                    let target = pane.unwrap_or(self.session.focused);
+                    self.session.focused = target;
                     nav_task = self.open_card(target, &item.as_ref().into());
                 }
                 // A click without a drag selects the playlist (mirrors how a
@@ -93,7 +93,7 @@ impl MusicPlayer {
                 Pressed::ServerPlaylist(target) => {
                     let name = self.server_playlist_name(&target);
                     nav_task =
-                        self.open_server_playlist(self.focused_pane_id, target, &name, false);
+                        self.open_server_playlist(self.session.focused, target, &name, false);
                 }
             }
         }
@@ -409,10 +409,10 @@ impl MusicPlayer {
     }
 
     fn copy_to_queue(&mut self, source: PaneId, indices: &[usize], drop_idx: usize) {
-        let clamped = drop_idx.min(self.queue.tracks.len());
+        let clamped = drop_idx.min(self.session.queue.tracks.len());
         let tracks = self.get_tracks_at(indices, source);
         let inserted = tracks.len();
-        self.queue.tracks.splice(clamped..clamped, tracks);
+        self.session.queue.tracks.splice(clamped..clamped, tracks);
         self.save_session();
         let msg = (self.strings.added_to)(inserted, self.strings.queue);
         self.notify(msg);
@@ -633,7 +633,7 @@ impl MusicPlayer {
         match pressed {
             Pressed::Track(pos) => {
                 if is_main_pane(pos.pane) {
-                    self.focused_pane_id = pos.pane;
+                    self.session.focused = pos.pane;
                 }
                 let now = std::time::Instant::now();
                 // Comparing the full position, not just the index, keeps a click
@@ -660,7 +660,7 @@ impl MusicPlayer {
                 });
             }
             Pressed::Card(_, Some(pane)) => {
-                self.focused_pane_id = pane;
+                self.session.focused = pane;
                 self.drag.pressed = Some(PressedDrag {
                     what: pressed,
                     origin: self.drag.cursor_pos,
@@ -719,7 +719,7 @@ mod tests {
             ProviderId::YouTube,
             SearchScope::Songs,
         )]);
-        p.queue.tracks = (0..count)
+        p.session.queue.tracks = (0..count)
             .map(|i| {
                 Track::from_provider(
                     ProviderId::YouTube,

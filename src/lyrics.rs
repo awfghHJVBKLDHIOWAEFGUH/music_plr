@@ -88,7 +88,6 @@ pub struct LyricsRequest {
 pub struct LyricLine {
     pub time: Option<f32>,
     pub text: String,
-    #[serde(default)]
     pub description: String,
 }
 
@@ -108,7 +107,6 @@ pub struct Lyrics {
 pub struct TranslatedLyrics {
     pub language: String,
     pub lyrics: Lyrics,
-    #[serde(default)]
     pub source: Option<String>,
 }
 
@@ -808,121 +806,108 @@ fn fetch_genius_song_details(api_path: &str) -> Result<Option<GeniusSongDetails>
     }))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
 struct GeniusSearchResponse {
-    #[serde(default)]
     response: GeniusSearchInner,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
 struct GeniusSearchInner {
-    #[serde(default)]
     sections: Vec<GeniusSection>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
 struct GeniusSection {
-    #[serde(default)]
     hits: Vec<GeniusHit>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
 struct GeniusHit {
-    #[serde(default)]
     result: Option<GeniusSongHit>,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
 struct GeniusSongHit {
-    #[serde(rename = "_type", default)]
+    #[serde(rename = "_type")]
     kind: String,
-    #[serde(default)]
     id: u64,
-    #[serde(default)]
     title: String,
-    #[serde(default)]
     artist_names: String,
-    #[serde(default)]
     url: String,
-    #[serde(default)]
     api_path: String,
-    #[serde(default)]
     lyrics_state: String,
-    #[serde(default)]
     instrumental: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
 struct GeniusReferentsResponse {
-    #[serde(default)]
     response: GeniusReferentsInner,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
 struct GeniusReferentsInner {
-    #[serde(default)]
     referents: Vec<GeniusReferent>,
-    #[serde(default)]
     next_page: Option<u32>,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
 struct GeniusReferent {
-    #[serde(default)]
     range: GeniusRange,
-    #[serde(default)]
     annotations: Vec<GeniusAnnotation>,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
 struct GeniusRange {
-    #[serde(default)]
     content: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
 struct GeniusAnnotation {
-    #[serde(default)]
     body: Option<GeniusText>,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
 struct GeniusText {
-    #[serde(default)]
     plain: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
 struct GeniusSongResponse {
-    #[serde(default)]
     response: GeniusSongInner,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
 struct GeniusSongInner {
-    #[serde(default)]
     song: GeniusSong,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
 struct GeniusSong {
-    #[serde(default)]
     description: Option<GeniusText>,
-    #[serde(default)]
     language: String,
-    #[serde(default)]
     translation_songs: Vec<GeniusTranslationHit>,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
 struct GeniusTranslationHit {
-    #[serde(default)]
     language: String,
-    #[serde(default)]
     url: String,
-    #[serde(default)]
     lyrics_state: String,
-    #[serde(default)]
     hidden: bool,
 }
 
@@ -1071,11 +1056,12 @@ fn normalize_lyric(text: &str) -> String {
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
 struct LrcLibRecord {
-    #[serde(rename = "syncedLyrics", default)]
+    #[serde(rename = "syncedLyrics")]
     synced_lyrics: Option<String>,
-    #[serde(rename = "plainLyrics", default)]
+    #[serde(rename = "plainLyrics")]
     plain_lyrics: Option<String>,
 }
 

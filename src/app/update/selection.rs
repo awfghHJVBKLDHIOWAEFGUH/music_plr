@@ -95,7 +95,7 @@ impl MusicPlayer {
     }
 
     pub fn clear_selection(&mut self) {
-        let panes: Vec<PaneId> = self.panes.keys().copied().collect();
+        let panes: Vec<PaneId> = self.session.panes.keys().copied().collect();
         for pane in panes {
             self.clear_selection_in(pane);
         }
@@ -116,7 +116,11 @@ impl MusicPlayer {
     pub fn has_selection(&self) -> bool {
         !self.selection_in(QUEUE_PANE_ID).is_empty()
             || !self.selection_in(RECENT_PANE_ID).is_empty()
-            || self.panes.keys().any(|p| !self.selection_in(*p).is_empty())
+            || self
+                .session
+                .panes
+                .keys()
+                .any(|p| !self.selection_in(*p).is_empty())
     }
 
     /// Clear the selection of the list addressed by `pane` if any of `indices`
@@ -134,7 +138,7 @@ impl MusicPlayer {
         let pane = self
             .drag
             .hovered_track()
-            .map_or(self.focused_pane_id, |h| h.pane);
+            .map_or(self.session.focused, |h| h.pane);
         let count = self.track_count_in(pane);
         let Some(sel) = self.selection_mut_in(pane) else {
             return;
@@ -146,8 +150,8 @@ impl MusicPlayer {
     pub fn get_track_ref_at(&self, pos: TrackPos) -> Option<&Track> {
         let TrackPos { index, pane } = pos;
         match pane {
-            QUEUE_PANE_ID => self.queue.tracks.get(index),
-            RECENT_PANE_ID => self.queue.recently_played.get(index),
+            QUEUE_PANE_ID => self.session.queue.tracks.get(index),
+            RECENT_PANE_ID => self.session.queue.recently_played.get(index),
             _ => self.view_tracks_in(pane).get(index),
         }
     }
@@ -170,7 +174,7 @@ impl MusicPlayer {
     /// ignored. Queue/Recent rows live in the global panel and always count.
     pub fn focused_hovered_track(&self) -> Option<TrackPos> {
         let pos = self.drag.hovered_track()?;
-        if is_main_pane(pos.pane) && pos.pane != self.focused_pane_id {
+        if is_main_pane(pos.pane) && pos.pane != self.session.focused {
             None
         } else {
             Some(pos)
@@ -199,8 +203,8 @@ impl MusicPlayer {
     /// first index skips.
     pub fn track_count_in(&self, pane: PaneId) -> usize {
         match pane {
-            QUEUE_PANE_ID => self.queue.tracks.len(),
-            RECENT_PANE_ID => self.queue.recently_played.len(),
+            QUEUE_PANE_ID => self.session.queue.tracks.len(),
+            RECENT_PANE_ID => self.session.queue.recently_played.len(),
             _ => self.view_tracks_in(pane).len(),
         }
     }
@@ -260,8 +264,8 @@ mod tests {
     #[test]
     fn recent_selection_toggles_like_other_lists() {
         let mut p = player();
-        p.queue.recently_played.push_back(track("1"));
-        p.queue.recently_played.push_back(track("2"));
+        p.session.queue.recently_played.push_back(track("1"));
+        p.session.queue.recently_played.push_back(track("2"));
         let pos0 = TrackPos::new(0, RECENT_PANE_ID);
         let pos1 = TrackPos::new(1, RECENT_PANE_ID);
 
@@ -281,15 +285,15 @@ mod tests {
     #[test]
     fn toggle_adds_then_removes_per_list() {
         let mut p = player();
-        p.queue.tracks = vec![track("1"), track("2")];
+        p.session.queue.tracks = vec![track("1"), track("2")];
         p.view_data_mut().set_tracks(vec![track("1")]);
 
         let q = TrackPos::new(0, QUEUE_PANE_ID);
-        let a = TrackPos::new(0, p.focused_pane_id);
+        let a = TrackPos::new(0, p.session.focused);
         p.toggle_selection(q);
         p.toggle_selection(a);
         assert_eq!(p.selection_in(QUEUE_PANE_ID), &[0]);
-        assert_eq!(p.selection_in(p.focused_pane_id), &[0]);
+        assert_eq!(p.selection_in(p.session.focused), &[0]);
 
         // Selections are scoped per list.
         assert_eq!(p.get_track_at(q).map(|t| t.title), Some("Track 1".into()));
@@ -297,9 +301,9 @@ mod tests {
 
         p.toggle_selection(q);
         assert!(p.selection_in(QUEUE_PANE_ID).is_empty());
-        assert_eq!(p.selection_in(p.focused_pane_id), &[0]);
+        assert_eq!(p.selection_in(p.session.focused), &[0]);
 
         p.clear_selection();
-        assert!(p.selection_in(p.focused_pane_id).is_empty());
+        assert!(p.selection_in(p.session.focused).is_empty());
     }
 }

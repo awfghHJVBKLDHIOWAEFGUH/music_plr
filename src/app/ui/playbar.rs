@@ -28,7 +28,7 @@ fn time_text(time: u32) -> Element<'static, Message, AppTheme> {
 #[allow(clippy::too_many_lines)]
 pub(super) fn view_playbar<'a>(player: &'a MusicPlayer) -> Element<'a, Message, AppTheme> {
     let dir = player.strings.direction;
-    let track = player.queue.current();
+    let track = player.session.queue.current();
     let title = track.map_or(player.strings.not_playing, |t| t.title.as_str());
 
     let track_thumb: Element<'a, Message, AppTheme> = if let Some(t) = track {
@@ -43,7 +43,7 @@ pub(super) fn view_playbar<'a>(player: &'a MusicPlayer) -> Element<'a, Message, 
 
     let mut children = vec![text(title).into()];
     if let Some(t) = track {
-        children.push(subtitle_artists(player.focused_pane_id, t, dir));
+        children.push(subtitle_artists(player.session.focused, t, dir));
     }
 
     let track_info = Column::with_children(children).spacing(theme::SPACING_XXS);
@@ -90,15 +90,15 @@ pub(super) fn view_playbar<'a>(player: &'a MusicPlayer) -> Element<'a, Message, 
     let controls_and_progress =
         Column::with_children([controls.into(), progress]).spacing(theme::SPACING_XS);
 
-    let volume_slider = slider(0.0..=1.0, player.volume, Message::SetVolume)
+    let volume_slider = slider(0.0..=1.0, player.session.volume, Message::SetVolume)
         .width(theme::VOLUME_SLIDER_WIDTH)
         .step(0.01f32);
 
-    let queue_btn =
-        playbar_toggle_button(icons::QUEUE_ICON, player.show_queue).on_press(Message::ToggleQueue);
+    let queue_btn = playbar_toggle_button(icons::QUEUE_ICON, player.session.show_queue)
+        .on_press(Message::ToggleQueue);
 
-    let repeat_btn =
-        playbar_toggle_button(icons::REPEAT_ICON, player.repeat).on_press(Message::ToggleRepeat);
+    let repeat_btn = playbar_toggle_button(icons::REPEAT_ICON, player.session.repeat)
+        .on_press(Message::ToggleRepeat);
 
     let liked = player.is_current_track_liked();
     let like_btn = track.map_or_else(
@@ -112,7 +112,7 @@ pub(super) fn view_playbar<'a>(player: &'a MusicPlayer) -> Element<'a, Message, 
 
     let lyrics_open = player.focused_pane().lyrics.is_some();
     let lyrics_btn = playbar_toggle_button(icons::LYRICS_ICON, lyrics_open)
-        .on_press(Message::ShowLyrics(player.focused_pane_id));
+        .on_press(Message::ShowLyrics(player.session.focused));
 
     Container::new(
         dir.row([

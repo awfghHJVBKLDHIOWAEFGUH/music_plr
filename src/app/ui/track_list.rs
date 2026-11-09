@@ -128,6 +128,7 @@ pub(super) fn leading_control<'a>(
     trashed: bool,
 ) -> Element<'a, Message, AppTheme> {
     let is_current = player
+        .session
         .queue
         .current()
         .is_some_and(|t| t.same_identity(track));
@@ -175,6 +176,7 @@ fn view_track_row_inner<'a>(
     let is_hovered = player.drag.hovered_track() == Some(pos);
     let is_dragging = player.is_dragging_track(pos);
     let is_current = player
+        .session
         .queue
         .current()
         .is_some_and(|t| t.same_identity(track));
@@ -264,7 +266,7 @@ fn track_row_layout_inner<'a>(
     let pane = if is_main_pane(pos.pane) {
         pos.pane
     } else {
-        player.focused_pane_id
+        player.session.focused
     };
     let thumb = player.thumbnail_index.get(track.source, track.primary_id());
     let is_downloaded = player.download_registry.contains(&track.cache_key());

@@ -11,7 +11,7 @@ use crate::{
         update::operation::{CaptureContextMenu, ScrollTarget},
         LyricsViewMode, Message, ViewKind,
     },
-    data::library::Card,
+    data::JsonStore,
     load_state::LoadState,
     providers::ProviderId,
 };
@@ -56,7 +56,7 @@ impl MusicPlayer {
             self.pane_mut(pane).lyrics = None;
             Task::none()
         } else {
-            let provider = self.lyrics_provider;
+            let provider = self.session.lyrics_provider;
             self.pane_mut(pane).lyrics = Some(crate::app::LyricsState::new(provider));
             self.scroll_lyrics_to_active(pane)
         }
@@ -93,17 +93,16 @@ impl MusicPlayer {
     }
 
     pub(super) fn flush_note_draft(&mut self, pane: PaneId) {
-        let (idx, text) = match self.pane(pane).lyrics.as_ref() {
-            Some(state) => match state.note_line {
-                Some(idx) => (idx, state.note_editor.text()),
-                None => return,
-            },
-            None => return,
-        };
-        let text = text.trim_end().to_string();
+        // Note drafts on provider lyrics are session-only; custom entries never
+        // show a translation, so `lyrics` is the entry itself here. The pane
+        // borrow ends before the cache is touched.
         let Some(state) = &mut self.pane_mut(pane).lyrics else {
             return;
         };
+        let Some(idx) = state.note_line else {
+            return;
+        };
+        let text = state.note_editor.text().trim_end().to_string();
         let track_id = state.track_id.clone();
         let custom_name = state.selected_custom.clone();
         let translated = state.selected_translation.is_some();
@@ -117,12 +116,11 @@ impl MusicPlayer {
             return;
         }
         line.description = text;
-        // Note drafts on provider lyrics are session-only; custom entries
-        // never show a translation, so `lyrics` is the entry itself here.
         if !translated {
             if let (Some(track_id), Some(name)) = (track_id, custom_name) {
-                let mut cache = crate::data::lyrics_cache::LyricsCache::load_migrated();
-                cache.insert_custom(&track_id, &name, lyrics);
+                let lyrics = lyrics.clone();
+                self.lyrics_cache.insert_custom(&track_id, &name, &lyrics);
+                self.lyrics_cache.save();
             }
         }
     }
@@ -273,7 +271,7 @@ impl MusicPlayer {
         pane: PaneId,
         provider: crate::lyrics::LyricsProvider,
     ) {
-        self.lyrics_provider = provider;
+        self.session.lyrics_provider = provider;
         self.flush_note_draft(pane);
         if let Some(state) = &mut self.pane_mut(pane).lyrics {
             state.provider = provider;
@@ -300,7 +298,7 @@ impl MusicPlayer {
         pane: PaneId,
         language: Option<String>,
     ) -> Task<Message> {
-        let Some(track) = self.queue.current() else {
+        let Some(track) = self.session.queue.current() else {
             return Task::none();
         };
         let track_id = track.cache_key();
@@ -377,7 +375,7 @@ impl MusicPlayer {
 
     /// Open a blank editor for a new named custom entry.
     pub fn start_custom_lyrics_edit(&mut self, pane: PaneId) {
-        let Some(track) = self.queue.current() else {
+        let Some(track) = self.session.queue.current() else {
             return;
         };
         let track_id = track.cache_key();
@@ -396,13 +394,11 @@ impl MusicPlayer {
 
     /// Open the editor prefilled with the named custom entry.
     pub fn edit_custom_lyrics(&mut self, pane: PaneId, name: String) {
-        let Some(track) = self.queue.current() else {
+        let Some(track) = self.session.queue.current() else {
             return;
         };
         let track_id = track.cache_key();
-        let Some(entry) =
-            crate::data::lyrics_cache::LyricsCache::load_migrated().get_custom(&track_id, &name)
-        else {
+        let Some(entry) = self.lyrics_cache.get_custom(&track_id, &name) else {
             return;
         };
         self.flush_note_draft(pane);
@@ -420,15 +416,14 @@ impl MusicPlayer {
 
     /// Show the named custom entry for the current track.
     pub fn select_custom_lyrics(&mut self, pane: PaneId, name: String) -> Task<Message> {
-        let Some(track) = self.queue.current() else {
+        let Some(track) = self.session.queue.current() else {
             return Task::none();
         };
         let track_id = track.cache_key();
-        let cache = crate::data::lyrics_cache::LyricsCache::load_migrated();
-        let Some(entry) = cache.get_custom(&track_id, &name) else {
+        let Some(entry) = self.lyrics_cache.get_custom(&track_id, &name) else {
             return Task::none();
         };
-        let custom_names = cache.custom_names(&track_id);
+        let custom_names = self.lyrics_cache.custom_names(&track_id);
         self.flush_note_draft(pane);
         if let Some(state) = &mut self.pane_mut(pane).lyrics {
             let mode = LyricsViewMode::for_lyrics(&entry);
@@ -448,11 +443,18 @@ impl MusicPlayer {
     }
 
     pub fn save_custom_lyrics(&mut self, pane: PaneId) -> Task<Message> {
-        let (text, name) = self
+        let (text, name, track_id, edited) = self
             .pane(pane)
             .lyrics
             .as_ref()
-            .map(|s| (s.edit_content.text(), s.edit_name.trim()))
+            .map(|s| {
+                (
+                    s.edit_content.text(),
+                    s.edit_name.trim().to_string(),
+                    s.track_id.clone(),
+                    s.editing_custom_name.clone(),
+                )
+            })
             .unwrap_or_default();
         if name.is_empty() {
             self.notify_error(self.strings.lyrics_name_empty);
@@ -462,28 +464,17 @@ impl MusicPlayer {
             self.notify_error(self.strings.lyrics_empty);
             return Task::none();
         };
-        let Some(track_id) = self
-            .pane(pane)
-            .lyrics
-            .as_ref()
-            .and_then(|s| s.track_id.clone())
-        else {
+        let Some(track_id) = track_id else {
             return Task::none();
         };
-        let edited = self
-            .pane(pane)
-            .lyrics
-            .as_ref()
-            .and_then(|s| s.editing_custom_name.as_ref());
-        let mut cache = crate::data::lyrics_cache::LyricsCache::load_migrated();
-        cache.insert_custom(&track_id, name, &lyrics);
-        if let Some(old) = edited {
-            if old != name {
-                cache.remove_custom(&track_id, old);
+        self.lyrics_cache.insert_custom(&track_id, &name, &lyrics);
+        if let Some(old) = &edited {
+            if old != &name {
+                self.lyrics_cache.remove_custom(&track_id, old);
             }
         }
-        let name = name.to_string();
-        let custom_names = cache.custom_names(&track_id);
+        self.lyrics_cache.save();
+        let custom_names = self.lyrics_cache.custom_names(&track_id);
         if let Some(state) = &mut self.pane_mut(pane).lyrics {
             let mode = LyricsViewMode::for_lyrics(&lyrics);
             state.lyrics = crate::load_state::LoadState::Ready(Arc::new(lyrics));
@@ -512,31 +503,26 @@ impl MusicPlayer {
     }
 
     pub fn delete_custom_lyrics(&mut self, pane: PaneId) {
-        let Some(track_id) = self
+        let (Some(track_id), Some(target)) = self
             .pane(pane)
             .lyrics
             .as_ref()
-            .and_then(|s| s.track_id.clone())
+            .map(|s| {
+                (
+                    s.track_id.clone(),
+                    s.editing_custom_name
+                        .clone()
+                        .or_else(|| s.selected_custom.clone()),
+                )
+            })
+            .unwrap_or_default()
         else {
             return;
         };
-        let target = self
-            .pane(pane)
-            .lyrics
-            .as_ref()
-            .and_then(|s| s.editing_custom_name.clone())
-            .or_else(|| {
-                self.pane(pane)
-                    .lyrics
-                    .as_ref()
-                    .and_then(|s| s.selected_custom.clone())
-            });
-        let Some(target) = target else {
-            return;
-        };
-        let mut cache = crate::data::lyrics_cache::LyricsCache::load_migrated();
-        cache.remove_custom(&track_id, &target);
-        let custom_names = cache.custom_names(&track_id);
+        if self.lyrics_cache.remove_custom(&track_id, &target) {
+            self.lyrics_cache.save();
+        }
+        let custom_names = self.lyrics_cache.custom_names(&track_id);
         self.flush_note_draft(pane);
         if let Some(state) = &mut self.pane_mut(pane).lyrics {
             state.editing = false;
@@ -558,7 +544,7 @@ impl MusicPlayer {
     /// being shown and track changes.
     #[allow(clippy::too_many_lines)]
     pub(super) fn ensure_lyrics_for_current(&mut self, pane: PaneId) {
-        let Some(track) = self.queue.current() else {
+        let Some(track) = self.session.queue.current() else {
             self.flush_note_draft(pane);
             if let Some(state) = &mut self.pane_mut(pane).lyrics {
                 state.lyrics = crate::load_state::LoadState::Loading;
@@ -583,45 +569,73 @@ impl MusicPlayer {
         let tx = self.result_tx.clone();
         let no_lyrics = self.strings.no_lyrics_found;
         self.flush_note_draft(pane);
+        let Some((provider, editing, same_track, loading, selected)) =
+            self.pane(pane).lyrics.as_ref().map(|state| {
+                (
+                    state.provider,
+                    state.editing,
+                    state.track_id.as_deref() == Some(current_id.as_str()),
+                    state.lyrics.is_loading(),
+                    state.selected_custom.clone(),
+                )
+            })
+        else {
+            return;
+        };
+
+        if editing {
+            if same_track {
+                return;
+            }
+            if let Some(state) = &mut self.pane_mut(pane).lyrics {
+                state.editing = false;
+                state.editing_custom_name = None;
+            }
+        }
+        if same_track && !loading {
+            return;
+        }
+        let selected = if same_track {
+            selected
+        } else {
+            if let Some(state) = &mut self.pane_mut(pane).lyrics {
+                state.selected_custom = None;
+                state.reset_translation_state();
+            }
+            None
+        };
+        let custom_names = self.lyrics_cache.custom_names(&current_id);
+        let custom = selected.as_ref().and_then(|name| {
+            self.lyrics_cache
+                .get_custom(&current_id, name)
+                .map(|lyrics| (name.clone(), lyrics))
+        });
+        let cached = if custom.is_none() {
+            self.lyrics_cache.get_for(&current_id, provider)
+        } else {
+            None
+        };
+
         let Some(state) = &mut self.pane_mut(pane).lyrics else {
             return;
         };
-        let provider = state.provider;
-
-        if state.editing {
-            if state.track_id.as_deref() == Some(current_id.as_str()) {
-                return;
-            }
-            state.editing = false;
-            state.editing_custom_name = None;
-        }
-        let same_track = state.track_id.as_deref() == Some(current_id.as_str());
-        if same_track && !state.lyrics.is_loading() {
+        if let Some((name, custom)) = custom {
+            let mode = LyricsViewMode::for_lyrics(&custom);
+            state.lyrics = crate::load_state::LoadState::Ready(Arc::new(custom));
+            state.track_id = Some(current_id.clone());
+            state.mode = mode;
+            state.selected_custom = Some(name);
+            state.scrolled_to = None;
+            state.viewport = None;
+            state.custom_names = custom_names;
+            state.reset_translation_state();
+            state.reset_note_state();
+            Self::sync_editor_content(state);
             return;
         }
-        if !same_track {
-            state.selected_custom = None;
-            state.reset_translation_state();
-        }
-        let cache = crate::data::lyrics_cache::LyricsCache::load_migrated();
-        let custom_names = cache.custom_names(&current_id);
-        if let Some(name) = state.selected_custom.clone() {
-            if let Some(custom) = cache.get_custom(&current_id, &name) {
-                let mode = LyricsViewMode::for_lyrics(&custom);
-                state.lyrics = crate::load_state::LoadState::Ready(Arc::new(custom));
-                state.track_id = Some(current_id.clone());
-                state.mode = mode;
-                state.scrolled_to = None;
-                state.viewport = None;
-                state.custom_names = custom_names;
-                state.reset_translation_state();
-                state.reset_note_state();
-                Self::sync_editor_content(state);
-                return;
-            }
+        if selected.is_some() {
             state.selected_custom = None;
         }
-        let cached = cache.get_for(&current_id, provider);
         if let Some(cached_lyrics) = cached {
             let mode = LyricsViewMode::for_lyrics(&cached_lyrics);
             state.lyrics = crate::load_state::LoadState::Ready(Arc::new(cached_lyrics));
@@ -798,9 +812,9 @@ impl MusicPlayer {
         let pane = if is_main_pane(menu.pos.pane) {
             menu.pos.pane
         } else {
-            self.focused_pane_id
+            self.session.focused
         };
-        self.panes.contains_key(&pane).then_some(pane)
+        self.session.panes.contains_key(&pane).then_some(pane)
     }
 
     /// Open the context menu for the card at `target` (an artist, album or
@@ -810,10 +824,10 @@ impl MusicPlayer {
     pub fn show_card_menu_at(
         &mut self,
         pane: PaneId,
-        target: ViewKind,
+        target: crate::app::view_data::CardMenuTarget,
         point: Point,
     ) -> Task<Message> {
-        self.focused_pane_id = pane;
+        self.session.focused = pane;
         self.dialog = Some(Dialog::CardMenu(CardMenuState {
             anchor: MenuAnchor::at(point),
             pane,
@@ -872,10 +886,7 @@ impl MusicPlayer {
         let Some(menu) = self.take_card_menu() else {
             return Task::none();
         };
-        let Some(item) = menu.target.library_item() else {
-            return Task::none();
-        };
-        self.toggle_library_save_with_toast(Card::new(item))
+        self.toggle_library_save_with_toast(menu.target.card)
     }
 
     /// Save the card menu's album/playlist as a local playlist, fetching its
@@ -884,9 +895,7 @@ impl MusicPlayer {
         let Some(menu) = self.take_card_menu() else {
             return Task::none();
         };
-        let Some(item) = menu.target.library_item() else {
-            return Task::none();
-        };
+        let item = menu.target.card;
         self.create_playlist_from_card(&item, self.playlists.playlists.len())
     }
 
@@ -1028,14 +1037,17 @@ mod tests {
             pane::QUEUE_PANE_ID,
             update::operation::{ListGeometry, RailKey},
         },
-        data::{config, library::LibraryItem},
+        data::{
+            config,
+            library::{Card, LibraryItem},
+        },
         providers::ArtistSectionKind,
     };
 
     #[test]
     fn right_click_anchor_subtracts_list_scroll() {
         let mut p = MusicPlayer::new_with(config::Config::default());
-        let pane = p.focused_pane_id;
+        let pane = p.session.focused;
         p.bounds.tracks.insert(
             pane,
             ListGeometry {
@@ -1057,7 +1069,7 @@ mod tests {
         use crate::data::library::LibraryKind;
 
         let mut p = MusicPlayer::new_with(config::Config::default());
-        let pane = p.focused_pane_id;
+        let pane = p.session.focused;
         p.reset_test_pane(vec![crate::app::ViewData::default()]);
         p.bounds.cards.insert(
             pane,
@@ -1087,7 +1099,7 @@ mod tests {
     }
 
     /// A card's own view, as the three card hosts build it.
-    fn album_view() -> ViewKind {
+    fn album_view() -> crate::app::view_data::CardMenuTarget {
         let item = LibraryItem {
             kind: crate::data::library::LibraryKind::Album,
             id: "a1".into(),
@@ -1096,7 +1108,7 @@ mod tests {
             provider: ProviderId::YouTube,
             url: "https://music.youtube.com/browse/MPREb_a1".into(),
         };
-        ViewKind::from(&item)
+        crate::app::view_data::CardMenuTarget::new(Card::new(item))
     }
 
     #[test]
@@ -1104,7 +1116,7 @@ mod tests {
         use crate::app::{interaction::CardAction, update::operation::ScrollTarget};
 
         let mut p = MusicPlayer::new_with(config::Config::default());
-        let pane = p.focused_pane_id;
+        let pane = p.session.focused;
         let _ = p.update(Message::CardRightClicked {
             host: ScrollTarget::Cards(pane),
             pane,
@@ -1141,7 +1153,7 @@ mod tests {
         use crate::app::update::operation::ScrollTarget;
 
         let mut p = MusicPlayer::new_with(config::Config::default());
-        let pane = p.focused_pane_id;
+        let pane = p.session.focused;
         let _ = p.update(Message::Scrolled(
             ScrollTarget::Tracks(pane),
             iced::Vector::new(0.0, 90.0),
@@ -1166,7 +1178,7 @@ mod tests {
         use crate::app::update::operation::ScrollTarget;
 
         let mut p = MusicPlayer::new_with(config::Config::default());
-        let pane = p.focused_pane_id;
+        let pane = p.session.focused;
         p.bounds.cards.insert(
             pane,
             ListGeometry {

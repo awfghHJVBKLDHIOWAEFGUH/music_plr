@@ -23,9 +23,9 @@ use crate::{
             },
         },
         update::operation::{RailKey, ScrollTarget},
-        Message, ViewKind,
+        view_data::CardMenuTarget,
+        Message,
     },
-    data::library::Card,
     i18n::{Direction, Strings},
     icons,
     theme::{self, AppTheme},
@@ -569,26 +569,20 @@ fn card_body<'a>(
 pub fn art_card<'a>(
     player: &'a super::MusicPlayer,
     pane: PaneId,
-    target: ViewKind,
+    target: CardMenuTarget,
     title: &'a str,
     subtitle: &str,
     rail: RailKey,
 ) -> Element<'a, Message, AppTheme> {
-    let card = target
-        .card_ref()
-        .expect("a card shelf only renders artist, album and playlist cards");
-    let item = Card::new(
-        target
-            .library_item()
-            .expect("a card shelf only renders artist, album and playlist cards"),
-    );
-    let is_hovered = player.drag.is_hovered_card(&item);
+    let card = target.card_ref();
+    let card_handle = target.card.clone();
+    let is_hovered = player.drag.is_hovered_card(&target.card);
     let is_dragging_this = matches!(
         player.drag.pressed,
         Some(crate::app::interaction::PressedDrag {
             what: Pressed::Card(ref c, _),
             ..
-        }) if c == &item
+        }) if c == &target.card
     );
     let hot = is_hovered || is_dragging_this;
     let thumb_path = player.thumbnail_index.get(card.provider, card.id);
@@ -604,9 +598,12 @@ pub fn art_card<'a>(
     });
     let area = MouseArea::new(body)
         .interaction(player.drag.clickable_cursor_interaction())
-        .on_press(Message::DragPress(Pressed::Card(item.clone(), Some(pane))))
-        .on_enter(Message::HoverStart(HoverTarget::Card(item.clone())))
-        .on_exit(Message::HoverEnd(HoverTarget::Card(item)));
+        .on_press(Message::DragPress(Pressed::Card(
+            card_handle.clone(),
+            Some(pane),
+        )))
+        .on_enter(Message::HoverStart(HoverTarget::Card(card_handle.clone())))
+        .on_exit(Message::HoverEnd(HoverTarget::Card(card_handle)));
     super::right_click::RightClickArea::new(
         area,
         CardTarget {

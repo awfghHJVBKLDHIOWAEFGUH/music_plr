@@ -13,8 +13,8 @@ use crate::{
     data::library::LibraryKind,
     providers::{
         AlbumMeta, ArtistAlbumCard, ArtistDataKind, ArtistHeader, ArtistPage, CardData,
-        ClientEvent, HomeCard, HomeSection, HomeSectionData, HomeSectionKey, HomeSectionKind,
-        ProviderId, RelatedArtistCard, SearchScope, SearchTab,
+        ClientEvent, HomeSection, HomeSectionData, HomeSectionKey, HomeSectionKind, ProviderId,
+        RelatedArtistCard, SearchScope, SearchTab,
     },
     theme::SEARCH_PAGE_SIZE,
     types::{Track, TrackAlbum},
@@ -241,13 +241,15 @@ fn artist_card(item: MusicArtistItem) -> Option<CardData> {
     if item.browse_id.is_empty() {
         return None;
     }
-    Some(CardData {
-        url: artist_page_url(&item.browse_id),
-        id: item.browse_id,
-        title: item.name,
-        subtitle: item.subscribers.unwrap_or_default(),
-        thumbnail: item.thumbnail.unwrap_or_default(),
-    })
+    Some(CardData::new(
+        LibraryKind::Artist,
+        ProviderId::YouTube,
+        item.browse_id.clone(),
+        item.name,
+        item.subscribers.unwrap_or_default(),
+        item.thumbnail.unwrap_or_default(),
+        artist_page_url(&item.browse_id),
+    ))
 }
 
 fn album_card(item: MusicAlbumItem) -> Option<CardData> {
@@ -265,13 +267,15 @@ fn album_card(item: MusicAlbumItem) -> Option<CardData> {
     } else {
         names.join(", ")
     };
-    Some(CardData {
-        url: album_page_url(&item.browse_id),
-        id: item.browse_id,
-        title: item.title,
-        subtitle: clean_home_subtitle(&subtitle),
-        thumbnail: item.thumbnail.unwrap_or_default(),
-    })
+    Some(CardData::new(
+        LibraryKind::Album,
+        ProviderId::YouTube,
+        item.browse_id.clone(),
+        item.title,
+        clean_home_subtitle(&subtitle),
+        item.thumbnail.unwrap_or_default(),
+        album_page_url(&item.browse_id),
+    ))
 }
 
 fn playlist_card(item: MusicPlaylistItem) -> Option<CardData> {
@@ -279,13 +283,15 @@ fn playlist_card(item: MusicPlaylistItem) -> Option<CardData> {
     if id.is_empty() {
         return None;
     }
-    Some(CardData {
-        url: playlist_page_url(id),
-        id: id.to_string(),
-        title: item.title,
-        subtitle: item.author.or(item.description).unwrap_or_default(),
-        thumbnail: item.thumbnail.unwrap_or_default(),
-    })
+    Some(CardData::new(
+        LibraryKind::Playlist,
+        ProviderId::YouTube,
+        id.to_string(),
+        item.title,
+        item.author.or(item.description).unwrap_or_default(),
+        item.thumbnail.unwrap_or_default(),
+        playlist_page_url(id),
+    ))
 }
 
 /// Run a search and split the result into the playable `Track` list (for
@@ -511,7 +517,7 @@ pub fn home_sections() -> Result<Vec<HomeSection>> {
         .iter()
         .find(|shelf| shelf.tracks.len() < 5 && shelf.cards.len() >= 4);
     if let Some(shelf) = for_you {
-        let cards: Vec<HomeCard> = shelf.cards.clone();
+        let cards: Vec<CardData> = shelf.cards.clone();
         if !cards.is_empty() {
             sections.push(HomeSection::new(
                 HomeSectionKey::new(ProviderId::YouTube, HomeSectionKind::ForYou),
@@ -526,12 +532,7 @@ pub fn home_sections() -> Result<Vec<HomeSection>> {
         sections.push(HomeSection::new(
             HomeSectionKey::new(ProviderId::YouTube, HomeSectionKind::NewReleases),
             String::new(),
-            HomeSectionData::Cards(
-                new_releases
-                    .into_iter()
-                    .map(|card| HomeCard::new(LibraryKind::Album, ProviderId::YouTube, card))
-                    .collect(),
-            ),
+            HomeSectionData::Cards(new_releases),
         ));
     }
 
@@ -608,14 +609,15 @@ fn artist_page_from(
             if item.browse_id.is_empty() {
                 continue;
             }
-            albums.push(ArtistAlbumCard {
-                id: item.browse_id.clone(),
-                title: item.title.clone(),
-                date: item.year.clone().unwrap_or_default(),
-                badge: badge.to_string(),
-                thumbnail: item.thumbnail.clone().unwrap_or_default(),
-                url: album_page_url(&item.browse_id),
-            });
+            albums.push(ArtistAlbumCard::new(
+                ProviderId::YouTube,
+                item.browse_id.clone(),
+                item.title.clone(),
+                badge,
+                item.year.clone().unwrap_or_default(),
+                item.thumbnail.clone().unwrap_or_default(),
+                album_page_url(&item.browse_id),
+            ));
         }
     }
     // `MusicArtistPage::featured_on` is never populated by the crate's parser,
@@ -625,7 +627,10 @@ fn artist_page_from(
         if let Ok(session) = session() {
             if let Ok(raw) = run_innertube(raw_browse(session, id.to_string())) {
                 for card in raw_artist_playlist_cards(&raw) {
-                    if !playlists.iter().any(|existing| existing.id == card.id) {
+                    if !playlists
+                        .iter()
+                        .any(|existing| existing.card.id == card.card.id)
+                    {
                         playlists.push(card);
                     }
                 }
@@ -636,12 +641,15 @@ fn artist_page_from(
         .similar_artists
         .iter()
         .filter(|item| !item.browse_id.is_empty())
-        .map(|item| RelatedArtistCard {
-            id: item.browse_id.clone(),
-            name: item.name.clone(),
-            stat: item.subscribers.clone().unwrap_or_default(),
-            thumbnail: item.thumbnail.clone().unwrap_or_default(),
-            url: artist_page_url(&item.browse_id),
+        .map(|item| {
+            RelatedArtistCard::new(
+                ProviderId::YouTube,
+                item.browse_id.clone(),
+                item.name.clone(),
+                item.subscribers.clone().unwrap_or_default(),
+                item.thumbnail.clone().unwrap_or_default(),
+                artist_page_url(&item.browse_id),
+            )
         })
         .collect();
 
@@ -751,7 +759,7 @@ fn filter_artist_page(page: &mut ArtistPage, kinds: &[ArtistDataKind]) {
 pub fn resolve_artist_id(name: &str) -> Result<Option<String>> {
     let (_, tab) = search_ytmusic(name, SearchScope::Artists)?;
     Ok(match tab {
-        SearchTab::Artists(cards) => cards.into_iter().next().map(|c| c.id),
+        SearchTab::Artists(cards) => cards.into_iter().next().map(|c| c.card.id.clone()),
         _ => None,
     })
 }
