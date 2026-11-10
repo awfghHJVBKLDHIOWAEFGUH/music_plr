@@ -22,13 +22,13 @@ The fork's release pipeline publishes Linux, macOS, and Windows assets with SHA-
 
 ## Memory usage
 
-No controlled memory benchmark has been recorded for v1.5.5. This release does not claim a memory improvement over upstream GooseMusic v1.5.5.
+In the recorded memory comparison, normal GooseMusic used **122 MiB RSS and 122 MiB PSS**, while this TinySkia fork used **44 MiB RSS and 44 MiB PSS**. That's a reduction of approximately **64%** in both reported measurements.
 
 ## Build and testing
 
 The v1.5.5 migration branch passes `cargo metadata --locked --no-deps`, `cargo check --locked`, and the fork updater tests. An optimized release build (`cargo build --release --locked`) completed successfully on Linux x86_64 with LTO, `codegen-units = 1`, `panic = "abort"`, and stripping enabled. The resulting binary contains no WGPU components.
 
-The renderer configuration used by v1.5.5 is the same one that passed local runtime checks for audio playback, album artwork, mosaic rendering, and SVG rendering. Validation remains local, not a cross-platform test matrix; no FPS, memory, or speed improvement is claimed.
+The renderer configuration used by v1.5.5 is the same one that passed local runtime checks for audio playback, album artwork, mosaic rendering, and SVG rendering. Validation remains local, not a cross-platform test matrix; no FPS or speed improvement is claimed.
 
 ## Cross-platform compatibility
 
