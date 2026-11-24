@@ -1,7 +1,8 @@
 //! Automatic version checking and self-update.
 //!
-//! A background thread queries the latest stable 1.x version on crates.io,
-//! compares it against the compiled-in [`APP_VERSION`], and — when a newer
+//! A background thread queries the latest stable release on this fork's
+//! GitHub Releases page, compares it against the compiled-in [`APP_VERSION`],
+//! and — when a newer
 //! release exists and the binary was not installed via a package manager —
 //! downloads the matching platform asset from the GitHub release page
 //! (`.../releases/download/v{version}/{asset}`), verifies its SHA-256
@@ -25,10 +26,13 @@ use crate::app::{message::BackendResult, MusicPlayer};
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// GitHub repository hosting the release binaries.
-const GITHUB_REPO: &str = "GooseOb/music_plr";
+const GITHUB_REPO: &str = "awfghHJVBKLDHIOWAEFGUH/music_plr";
 
-/// Crate name on crates.io, the source of truth for the latest version.
-const CRATES_IO_NAME: &str = "goosemusic";
+/// Release tag embedded by tagged CI builds; local builds fall back to Cargo's version.
+const APP_RELEASE_TAG: &str = match option_env!("GOOSE_RELEASE_TAG") {
+    Some(tag) if !tag.is_empty() => tag,
+    _ => APP_VERSION,
+};
 
 /// Live status of the version-check / update pipeline, surfaced by the
 /// Settings `Updates` section and the update-toast logic.
@@ -64,7 +68,7 @@ pub enum UpdateStatus {
 pub enum VersionCheckOutcome {
     /// Installed via a package manager — can't self-update.
     PackageManaged,
-    /// No newer stable version on crates.io.
+    /// No newer stable release on this fork's GitHub Releases page.
     UpToDate,
     /// A newer release is available for download.
     Available {
@@ -92,80 +96,113 @@ pub fn can_self_update() -> bool {
     std::fs::write(&probe, []).is_ok() && std::fs::remove_file(&probe).is_ok()
 }
 
-// ── crates.io version lookup ──────────────────────────────────────────
-
-/// Minimal crates.io response shape: one entry per published version.
-#[derive(Deserialize)]
-struct CratesIoVersionsResponse {
-    versions: Vec<CratesIoVersion>,
-}
+// ── GitHub Releases version lookup ───────────────────────────────────
 
 #[derive(Deserialize)]
-struct CratesIoVersion {
-    num: String,
-    yanked: bool,
+struct GitHubReleaseResponse {
+    tag_name: String,
+    draft: bool,
+    prerelease: bool,
 }
 
-/// Release page URL for a bare version, e.g. `.../releases/tag/v1.2.3`.
+fn release_tag(version: &str) -> String {
+    if version.starts_with('v') {
+        version.to_string()
+    } else {
+        format!("v{version}")
+    }
+}
+
 fn release_url(version: &str) -> String {
-    format!("https://github.com/{GITHUB_REPO}/releases/tag/v{version}")
+    format!(
+        "https://github.com/{GITHUB_REPO}/releases/tag/{}",
+        release_tag(version)
+    )
 }
 
-/// Predictable download URL for this platform's asset in release `v{version}`,
-/// served from the GitHub release page.
 fn constructed_asset_url(version: &str) -> String {
     format!(
-        "https://github.com/{GITHUB_REPO}/releases/download/v{version}/{}",
+        "https://github.com/{GITHUB_REPO}/releases/download/{}/{}",
+        release_tag(version),
         asset_name()
     )
 }
 
-/// Parse a three-part semver string (`major.minor.patch`, ignoring any
-/// prerelease/build suffix). Returns `None` for anything else, including
-/// two-part or prerelease-only numbers.
+/// Parse a strict three-part `major.minor.patch` core. Returns `None` for
+/// anything else, including two-part numbers, leading `+` signs, empty or
+/// non-numeric components, and any trailing junk.
 fn parse_semver(s: &str) -> Option<(u32, u32, u32)> {
-    let core = s.split(['-', '+']).next().unwrap_or(s);
-    let mut parts = core.split('.');
+    if s.is_empty() {
+        return None;
+    }
+    let mut parts = s.split('.');
     let (major, minor, patch) = (parts.next()?, parts.next()?, parts.next()?);
     if parts.next().is_some() {
         return None;
     }
-    Some((
-        major.parse().ok()?,
-        minor.parse().ok()?,
-        patch.parse().ok()?,
-    ))
+    let component = |part: &str| -> Option<u32> {
+        if part.is_empty() || !part.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        part.parse().ok()
+    };
+    Some((component(major)?, component(minor)?, component(patch)?))
 }
 
-/// Query crates.io for the latest stable, non-yanked release on the same
-/// major line as the running binary (a fresh 2.x must not be offered to 1.x
-/// installs — switching majors is a separate, manual decision).
+/// Parse a release tag into an ordering key. Accepted forms are a bare
+/// `major.minor.patch` and `major.minor.patch-tiny-skia.N`, where `N` is a
+/// non-negative decimal sequence number. Every other tag — prereleases,
+/// differently-cased or unknown suffixes, malformed cores and overflowing
+/// integers — is rejected rather than silently truncated.
+fn parse_release_key(tag: &str) -> Option<(u32, u32, u32, u32)> {
+    let tag = tag.strip_prefix('v').unwrap_or(tag);
+    let (core, revision) = match tag.split_once('-') {
+        Some((core, suffix)) => {
+            let revision = suffix.strip_prefix("tiny-skia.")?;
+            if revision.is_empty() || !revision.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            (core, revision.parse().ok()?)
+        }
+        None => (tag, 0),
+    };
+    let (major, minor, patch) = parse_semver(core)?;
+    Some((major, minor, patch, revision))
+}
+
+/// Query this fork's latest stable GitHub Release. Only releases on the
+/// running binary's major line are eligible for automatic updates.
 fn fetch_latest_version() -> Result<String, String> {
-    let url = format!("https://crates.io/api/v1/crates/{CRATES_IO_NAME}/versions");
+    let url = format!("https://api.github.com/repos/{GITHUB_REPO}/releases/latest");
     let mut resp = agent()
         .get(&url)
         .header(
             "User-Agent",
             &format!("goosemusic/{APP_VERSION} (https://github.com/{GITHUB_REPO})"),
         )
+        .header("Accept", "application/vnd.github+json")
         .call()
-        .map_err(|e| format!("Version check request failed: {e}"))?;
-    let parsed: CratesIoVersionsResponse = resp
+        .map_err(|e| format!("GitHub release check failed: {e}"))?;
+    let parsed: GitHubReleaseResponse = resp
         .body_mut()
         .read_json()
-        .map_err(|e| format!("Failed to parse crates.io response: {e}"))?;
-    let current = parse_semver(APP_VERSION)
-        .ok_or_else(|| format!("unknown current version {APP_VERSION}"))?;
-    let latest = parsed
-        .versions
-        .iter()
-        .filter(|v| !v.yanked)
-        .filter_map(|v| parse_semver(&v.num))
-        .filter(|(major, ..)| *major == current.0)
-        .max();
-    latest
-        .map(|(a, b, c)| format!("{a}.{b}.{c}"))
-        .ok_or_else(|| "crates.io returned no valid 1.x version".to_string())
+        .map_err(|e| format!("Failed to parse GitHub release response: {e}"))?;
+    if parsed.draft || parsed.prerelease {
+        return Err(
+            "GitHub returned a draft or prerelease instead of a stable release".to_string(),
+        );
+    }
+    let current = parse_release_key(APP_RELEASE_TAG)
+        .ok_or_else(|| format!("unknown current release tag {APP_RELEASE_TAG}"))?;
+    let latest = parse_release_key(&parsed.tag_name)
+        .ok_or_else(|| format!("unrecognized fork release tag {}", parsed.tag_name))?;
+    if latest.0 != current.0 {
+        return Err(format!(
+            "GitHub latest release {} is outside the current major version line",
+            parsed.tag_name
+        ));
+    }
+    Ok(parsed.tag_name)
 }
 
 /// Parse a `sha256sum` sidecar body (`<hex>  <filename>` or bare hex) into the
@@ -241,13 +278,15 @@ fn asset_name() -> &'static str {
 /// Returns `true` when `latest` (e.g. `"1.0.2"`) is strictly greater than
 /// `current` (e.g. `"1.0.1"`). The leading `v` on tags is stripped.
 fn version_gt(latest: &str, current: &str) -> bool {
-    let parse = |v: &str| -> Vec<u32> {
-        v.trim_start_matches('v')
-            .split('.')
-            .filter_map(|s| s.parse().ok())
-            .collect()
-    };
-    parse(latest) > parse(current)
+    match (parse_release_key(latest), parse_release_key(current)) {
+        (Some(latest), Some(current)) => latest > current,
+        _ => false,
+    }
+}
+
+/// Compare a candidate release against the exact release tag embedded in this binary.
+fn is_update_available(latest: &str) -> bool {
+    version_gt(latest, APP_RELEASE_TAG)
 }
 
 /// Shared `ureq` agent with timeouts so a dead GitHub endpoint can't hang a
@@ -265,9 +304,9 @@ fn agent() -> &'static ureq::Agent {
 
 // ── background operations ────────────────────────────────────────────
 
-/// Spawn a detached thread that queries crates.io for the latest stable
-/// version on the current major line, compares it against [`APP_VERSION`],
-/// and reports the outcome through `tx` as
+/// Spawn a detached thread that queries this fork's GitHub Releases for the
+/// latest stable version on the current major line, compares it against
+/// [`APP_RELEASE_TAG`], and reports the outcome through `tx` as
 /// [`BackendResult::VersionChecked`]. The asset URL is
 /// constructed from the version and the current platform.
 pub fn spawn_version_check(tx: tokio::sync::mpsc::UnboundedSender<BackendResult>) {
@@ -282,7 +321,7 @@ pub fn spawn_version_check(tx: tokio::sync::mpsc::UnboundedSender<BackendResult>
         let result: Result<VersionCheckOutcome, String> = (|| {
             let latest = fetch_latest_version()?;
 
-            if !version_gt(&latest, APP_VERSION) {
+            if !is_update_available(&latest) {
                 return Ok(VersionCheckOutcome::UpToDate);
             }
 
@@ -564,30 +603,119 @@ mod tests {
     use super::*;
 
     #[test]
-    fn version_gt_orders_bare_versions() {
+    fn version_gt_orders_fork_release_tags() {
+        assert!(version_gt("v1.5.2-tiny-skia.1", "v1.5.1-tiny-skia.1"));
+        assert!(version_gt("v1.5.1-tiny-skia.2", "v1.5.1-tiny-skia.1"));
+        assert!(version_gt("v1.5.5-tiny-skia.1", "v1.5.1-tiny-skia.1"));
+        assert!(version_gt("v1.5.5-tiny-skia.2", "v1.5.5-tiny-skia.1"));
         assert!(version_gt("1.3.6", "1.3.5"));
         assert!(version_gt("1.4.0", "1.3.9"));
-        assert!(!version_gt("1.3.5", "1.3.5"));
+        // A branch build at 1.5.5 should see the first tagged v1.5.5 fork release.
+        assert!(version_gt("v1.5.1-tiny-skia.1", "1.5.1"));
+        assert!(version_gt("v1.5.5-tiny-skia.1", "1.5.5"));
+        assert_eq!(parse_release_key("v1.5.1-tiny-skia.1"), Some((1, 5, 1, 1)));
+        assert_eq!(parse_release_key("v1.5.5-tiny-skia.1"), Some((1, 5, 5, 1)));
+        assert_eq!(parse_release_key("v1.5.1"), Some((1, 5, 1, 0)));
+        assert!(!version_gt("v1.5.1-tiny-skia.1", "v1.5.1-tiny-skia.1"));
+        assert!(!version_gt("v1.5.5-tiny-skia.1", "v1.5.5-tiny-skia.1"));
+        assert!(!is_update_available(APP_RELEASE_TAG));
         assert!(!version_gt("1.3.4", "1.3.5"));
     }
 
     #[test]
-    fn crates_response_parses_versions() {
-        let body = r#"{"versions": [{"num": "1.3.5", "yanked": false}, {"num": "2.0.0", "yanked": true}]}"#;
-        let parsed: CratesIoVersionsResponse = serde_json::from_str(body).unwrap();
-        assert_eq!(parsed.versions.len(), 2);
-        assert_eq!(parsed.versions[0].num, "1.3.5");
-        assert!(parsed.versions[1].yanked);
+    fn release_key_rejects_malformed_tiny_skia_suffix() {
+        assert_eq!(parse_release_key("v1.5.5-tiny-skia."), None);
+        assert_eq!(parse_release_key("v1.5.5-tiny-skia.x"), None);
+        assert_eq!(parse_release_key("v1.5-tiny-skia.1"), None);
+        assert_eq!(release_tag("v1.5.5-tiny-skia.1"), "v1.5.5-tiny-skia.1");
+        assert_eq!(release_tag("1.5.5"), "v1.5.5");
     }
 
     #[test]
-    fn parse_semver_handles_core_and_suffixes() {
+    fn embedded_release_tag_matches_build_environment() {
+        if let Some(expected) = option_env!("GOOSE_RELEASE_TAG").filter(|tag| !tag.is_empty()) {
+            assert_eq!(APP_RELEASE_TAG, expected);
+        }
+    }
+
+    #[test]
+    fn github_release_response_parses_tag() {
+        let body = r#"{"tag_name":"v1.5.5-tiny-skia.1","draft":false,"prerelease":false}"#;
+        let parsed: GitHubReleaseResponse = serde_json::from_str(body).unwrap();
+        assert_eq!(parsed.tag_name, "v1.5.5-tiny-skia.1");
+        assert!(!parsed.draft);
+        assert!(!parsed.prerelease);
+    }
+
+    #[test]
+    fn parse_semver_accepts_only_bare_cores() {
         assert_eq!(parse_semver("1.4.1"), Some((1, 4, 1)));
-        assert_eq!(parse_semver("1.4.1-rc1"), Some((1, 4, 1)));
-        assert_eq!(parse_semver("1.4.1+build"), Some((1, 4, 1)));
         assert_eq!(parse_semver("1.4"), None);
         assert_eq!(parse_semver("1.4.a"), None);
-        assert!(parse_semver("alpha").is_none());
+        assert_eq!(parse_semver("alpha"), None);
+        assert_eq!(parse_semver(""), None);
+        assert_eq!(parse_semver("1.4.1-rc1"), None);
+        assert_eq!(parse_semver("1.4.1+build"), None);
+        assert_eq!(parse_semver("1.4.1.2"), None);
+        assert_eq!(parse_semver("01.4.1"), Some((1, 4, 1)));
+        assert_eq!(parse_semver("+1.4.1"), None);
+        assert_eq!(parse_semver("1..1"), None);
+        assert_eq!(parse_semver("4294967296.0.0"), None);
+    }
+
+    #[test]
+    fn release_key_accepts_stable_and_tiny_skia_tags() {
+        assert_eq!(parse_release_key("v1.7.0"), Some((1, 7, 0, 0)));
+        assert_eq!(parse_release_key("1.7.0"), Some((1, 7, 0, 0)));
+        assert_eq!(parse_release_key("v1.7.0-tiny-skia.1"), Some((1, 7, 0, 1)));
+        assert_eq!(parse_release_key("v1.7.0-tiny-skia.2"), Some((1, 7, 0, 2)));
+        assert_eq!(
+            parse_release_key("v1.7.0-tiny-skia.4294967295"),
+            Some((1, 7, 0, u32::MAX))
+        );
+    }
+
+    #[test]
+    fn release_key_rejects_unknown_suffixes() {
+        assert_eq!(parse_release_key("v1.7.0-rc.1"), None);
+        assert_eq!(parse_release_key("v1.7.0-beta.2"), None);
+        assert_eq!(parse_release_key("v1.7.0-anything.1"), None);
+        assert_eq!(parse_release_key("v1.7.0-TinySkia.1"), None);
+        assert_eq!(parse_release_key("v1.7.0-TINYSKIA.1"), None);
+        assert_eq!(parse_release_key("v1.7.0-tiny-skia"), None);
+        assert_eq!(parse_release_key("v1.7.0-tiny-skia."), None);
+        assert_eq!(parse_release_key("v1.7.0-tiny-skia.abc"), None);
+        assert_eq!(parse_release_key("v1.7.0-tiny-skia.1.2"), None);
+        assert_eq!(parse_release_key("v1.7.0-tiny-skia.-1"), None);
+        assert_eq!(parse_release_key("v1.7.0+build"), None);
+        assert_eq!(parse_release_key("v1.7"), None);
+        assert_eq!(parse_release_key("v1.7.x"), None);
+        assert_eq!(parse_release_key("v1.7.0.1"), None);
+        assert_eq!(parse_release_key("v"), None);
+        assert_eq!(parse_release_key(""), None);
+        assert_eq!(parse_release_key("vv1.7.0"), None);
+    }
+
+    #[test]
+    fn release_key_rejects_integer_overflow() {
+        assert_eq!(parse_release_key("v4294967296.0.0"), None);
+        assert_eq!(parse_release_key("v1.4294967296.0"), None);
+        assert_eq!(parse_release_key("v1.7.4294967296"), None);
+        assert_eq!(parse_release_key("v1.7.0-tiny-skia.4294967296"), None);
+        assert_eq!(
+            parse_release_key("v1.7.0-tiny-skia.99999999999999999999"),
+            None
+        );
+    }
+
+    #[test]
+    fn version_gt_rejects_unparseable_tags() {
+        assert!(!version_gt("v1.7.0-rc.1", "v1.7.0"));
+        assert!(!version_gt("v1.7.0-anything.1", "v1.7.0"));
+        assert!(!version_gt("v1.7.0", "v1.7.0-rc.1"));
+        assert!(version_gt("v1.7.0-tiny-skia.1", "v1.7.0"));
+        assert!(version_gt("v1.7.0-tiny-skia.2", "v1.7.0-tiny-skia.1"));
+        assert!(version_gt("v1.7.1", "v1.7.0-tiny-skia.99"));
     }
 
     #[test]
@@ -603,23 +731,23 @@ mod tests {
             picks(&["2.0.0", "1.4.1", "1.4.0", "0.9.9"]),
             Some((1, 4, 1))
         );
-        assert_eq!(picks(&["2.0.0", "1.4.1-rc2"]), Some((1, 4, 1)));
+        assert_eq!(picks(&["2.0.0", "1.4.1-rc2"]), None);
         assert_eq!(picks(&["2.1.0"]), None);
     }
 
     #[test]
-    fn constructed_urls_follow_release_layout() {
-        let asset_url = constructed_asset_url("1.3.6");
+    fn constructed_urls_follow_fork_release_layout() {
+        let asset_url = constructed_asset_url("v1.5.5-tiny-skia.1");
         assert_eq!(
             asset_url,
             format!(
-                "https://github.com/GooseOb/music_plr/releases/download/v1.3.6/{}",
+                "https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr/releases/download/v1.5.5-tiny-skia.1/{}",
                 asset_name()
             )
         );
         assert_eq!(
-            release_url("1.3.6"),
-            "https://github.com/GooseOb/music_plr/releases/tag/v1.3.6"
+            release_url("v1.5.5-tiny-skia.1"),
+            "https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr/releases/tag/v1.5.5-tiny-skia.1"
         );
     }
 

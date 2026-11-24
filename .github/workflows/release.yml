@@ -1,5 +1,7 @@
 # Build release binaries for every desktop target and publish them as a
-# GitHub release. Triggered by tag.yml (auto-tag) or manually.
+# GitHub release. Primary trigger: pushing a `v*` tag. Manual and reusable
+# runs must also target a tag ref, e.g.
+#   gh workflow run release.yml --ref v1.7.0-tiny-skia.1
 #
 # Platforms (one job each):
 #   - icons         – generates .ico + .icns once (cached on app-icon.svg hash), uploads as artifact
@@ -14,6 +16,9 @@
 name: Release
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       prerelease:
@@ -26,16 +31,70 @@ on:
         type: boolean
         default: false
 
+# A release must never race another run over the same ref.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 # Default read-only; the GitHub-release job widens this to `write`.
 permissions:
   contents: read
 
 jobs:
+  tag:
+    name: Resolve release tag
+    runs-on: ubuntu-latest
+    outputs:
+      value: ${{ steps.tag.outputs.value }}
+      sha: ${{ steps.tag.outputs.sha }}
+    steps:
+      - name: Checkout tag commit
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref }}
+
+      - name: Resolve and validate tag
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          case "$tag" in
+            v*) ;;
+            *)
+              echo "::error::Release workflow must run on a v* tag ref, got '$tag'"
+              exit 1
+              ;;
+          esac
+          if ! git rev-parse --verify --quiet "refs/tags/$tag^{commit}" >/dev/null; then
+            echo "::error::Tag '$tag' does not exist as a Git tag"
+            exit 1
+          fi
+          sha="$(git rev-parse "refs/tags/$tag^{commit}")"
+          echo "value=$tag" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Resolved $tag -> $sha"
+
+      - name: Verify tag matches this run commit
+        env:
+          TAG_SHA: ${{ steps.tag.outputs.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_SHA" != "$TAG_SHA" ]; then
+            echo "::error::github.sha $GITHUB_SHA does not match tag commit $TAG_SHA"
+            exit 1
+          fi
+
   icons:
     name: Generate icons
+    needs: tag
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.tag.outputs.sha }}
 
       - name: Restore cached icons
         id: icon-cache
@@ -65,9 +124,12 @@ jobs:
 
   build-linux:
     name: Build (x86_64-unknown-linux-gnu)
+    needs: tag
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.tag.outputs.sha }}
 
       - name: Install system dependencies
         run: |
@@ -91,6 +153,8 @@ jobs:
           key: x86_64-unknown-linux-gnu
 
       - name: Build
+        env:
+          GOOSE_RELEASE_TAG: ${{ needs.tag.outputs.value }}
         run: cargo build --release --locked --target x86_64-unknown-linux-gnu
 
       - name: Package
@@ -113,7 +177,7 @@ jobs:
 
   build-macos:
     name: Build (${{ matrix.target }})
-    needs: icons
+    needs: [icons, tag]
     runs-on: macos-latest
     strategy:
       fail-fast: false
@@ -123,6 +187,8 @@ jobs:
           - target: x86_64-apple-darwin
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.tag.outputs.sha }}
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -141,6 +207,8 @@ jobs:
           path: .
 
       - name: Build
+        env:
+          GOOSE_RELEASE_TAG: ${{ needs.tag.outputs.value }}
         run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Build .app bundle
@@ -171,10 +239,12 @@ jobs:
 
   build-windows:
     name: Build (x86_64-pc-windows-msvc)
-    needs: icons
+    needs: [icons, tag]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.tag.outputs.sha }}
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -193,6 +263,8 @@ jobs:
           path: .
 
       - name: Build
+        env:
+          GOOSE_RELEASE_TAG: ${{ needs.tag.outputs.value }}
         run: cargo build --release --locked --target x86_64-pc-windows-msvc
 
       - name: Package
@@ -216,14 +288,14 @@ jobs:
 
   release:
     name: Publish release
-    needs: [build-linux, build-macos, build-windows]
+    needs: [tag, build-linux, build-macos, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ needs.tag.outputs.sha }}
 
       - name: Download artifacts
         uses: actions/download-artifact@v8
@@ -232,15 +304,9 @@ jobs:
           merge-multiple: true
           path: dist
 
-      - name: Find latest tag
-        id: tag
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: echo "value=$(gh api repos/$GITHUB_REPOSITORY/tags --jq '.[0].name')" >> "$GITHUB_OUTPUT"
-
       - name: Build release body from CHANGELOG.md
         env:
-          TAG: ${{ steps.tag.outputs.value }}
+          TAG: ${{ needs.tag.outputs.value }}
         run: |
           python3 - <<'EOF'
           import os
@@ -268,14 +334,14 @@ jobs:
           if not changelog:
               changelog = "_See the auto-generated notes below._"
 
-          footer = textwrap.dedent("""\
+          footer = textwrap.dedent(f"""\
           ## Quick install
 
           ```sh
-          curl -fsSL https://raw.githubusercontent.com/GooseOb/music_plr/master/scripts/install.sh | bash
+          curl -fsSL "https://raw.githubusercontent.com/awfghHJVBKLDHIOWAEFGUH/music_plr/{tag}/scripts/install.sh" | bash
           ```
 
-          Detects your platform and installs everything. See the [README](https://github.com/GooseOb/music_plr#installation) for manual install options.
+          Detects your platform and installs everything. See the [README](https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr/tree/{tag}#installation) for manual install options.
 
           ## Runtime prerequisites
 
@@ -296,38 +362,8 @@ jobs:
       - name: Publish
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ steps.tag.outputs.value }}
+          tag_name: ${{ needs.tag.outputs.value }}
           files: dist/*
           generate_release_notes: true
           prerelease: ${{ inputs.prerelease == true }}
           body_path: BODY.md
-
-  publish-crates-io:
-    name: Publish to crates.io
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libgtk-3-dev \
-            libasound2-dev \
-            libwayland-dev \
-            libxkbcommon-dev \
-            libx11-dev \
-            libxrandr-dev
-
-      - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          key: x86_64-unknown-linux-gnu-crate
-
-      - name: Publish to crates.io
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish

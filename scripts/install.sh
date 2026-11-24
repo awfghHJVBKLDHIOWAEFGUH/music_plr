@@ -10,7 +10,7 @@
 #   Windows: not supported (use the .zip from GitHub Releases)
 set -euo pipefail
 
-REPO="GooseOb/music_plr"
+REPO="awfghHJVBKLDHIOWAEFGUH/music_plr"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 
 red() { printf '\033[1;31m%s\033[0m\n' "$*" >&2; }

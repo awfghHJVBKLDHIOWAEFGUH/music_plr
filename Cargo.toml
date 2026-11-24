@@ -4,7 +4,7 @@ version = "1.7.0"
 edition = "2021"
 description = "A music player with YouTube search, local playback, and OS media controls"
 license = "MIT"
-repository = "https://github.com/GooseOb/music_plr"
+repository = "https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr"
 readme = "README.md"
 
 [profile.dev]
@@ -30,7 +30,6 @@ iced = { version = "0.14", default-features = false, features = [
     "tokio",
     "canvas",
     "advanced",
-    "wgpu",
     "tiny-skia",
     "crisp",
     "web-colors",
