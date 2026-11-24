@@ -1,138 +1,69 @@
-# GooseOb's Music Player
+# GooseMusic TinySkia
 
-![Screenshot](./docs/plr_screen.png)
+This repository is an independent TinySkia fork of GooseMusic, currently based on GooseMusic v1.5.5 and using Iced's TinySkia renderer. The goal of this fork is to get TinySkia working without changing the rest of the app.
 
-A YouTube/SoundCloud/Bandcamp/Audius search music player with local playback, downloads, and OS media controls, built with [iced](https://iced.rs).
+The v1.5.5 renderer changes are on [release-prep/tiny-skia-v1.5.5](https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr/tree/release-prep/tiny-skia-v1.5.5).
 
-## Features
+## Changes
 
-- **Search** — YouTube Music (Songs / Videos / Artists / Albums / Playlists) via the InnerTube API with yt-dlp fallback, plus SoundCloud, Bandcamp, Audius, Last.fm, and MusicBrainz search. Drill
-  into artists, albums, and playlists.
-- **Custom providers** — Add your own Subsonic-compatible server (Navidrome, Airsonic, Gonic) or Jellyfin server in Settings, test the connection, and use it for search, playback, downloads, radio, browsing, and artist pages.
-- **Streaming & caching** — Stream audio via yt-dlp (YouTube/SoundCloud) or direct HTTP (Bandcamp, Audius), with fully native decoding, cached to disk for instant replay.
-- **Downloads** — Download tracks to MP3 via yt-dlp, with a Downloads view and on-row indicators.
-- **Local music & playlists** — Add local files (MP3, FLAC, WAV, OGG, M4A, AAC, OPUS, WMA) and create, rename, delete, and organize playlists.
-- **Library** — Save albums, artists, and playlists; browse them from the sidebar.
-- **Artist pages** — Header with stats plus Most popular, Albums, Playlists, and Fans-also-like sections, each with its own provider picker.
-- **Radio** — Song radio and artist radio from search results.
-- **Queue** — Queue panel with Up Next and Recently Played tabs.
-- **Trashbin** — Trash tracks from the context menu; trashed tracks are skipped at track-change time, marked with an icon, and listed in the sidebar Trashbin view.
-- **Split panes** — Split the main view.
-- **Drag & drop** — Drag tracks between views, into the queue, onto playlists (reorder or turn a card into a local playlist), and into the
-  Library.
-- **Lyrics** — Free lyrics with synced lines that seek on click if available, plus Genius with per-line annotations and NetEase Cloud Music for CJK catalogs (Chinese translation and romanization in the language picker row); cached per track. Add your own named custom lyrics per track (plain or `[mm:ss.xx]`-synced) — they appear as tabs next to the providers, editable and deletable from the lyrics view. Attach multi-line notes to any custom line with `#` comment lines. **Translate with AI** — translate the active lyrics (with learner notes) via any OpenAI-compatible server or local Ollama; the API key, server URL, and model live in Settings, and the result opens in the lyrics editor for review.
-- **Media controls** — OS media keys / MPRIS (Linux) / SMTC (Windows) / Now Playing (macOS) via souvlaki.
-- **More** — Search history, volume normalization, navigation history, session restore, right-click context menus (tracks, and artist/album/playlist cards for open / open in browser / save as playlist), dark/light theme.
+- Based on GooseMusic `v1.5.5`.
+- Uses Iced `0.14`.
+- Resolves `iced_tiny_skia 0.14.1` and `tiny-skia 0.11.4`.
+- Enables the Iced `tiny-skia` feature.
+- Removes the single explicit Iced `wgpu` feature.
+- Keeps `image`, `svg`, `tokio`, `canvas`, `advanced`, `crisp`, `web-colors`, `thread-pool`, `x11`, and `wayland`.
+- Updates `Cargo.lock`.
+- Incorporates the upstream v1.5.2–v1.5.5 changes, including the InnerTube migration that replaces the Python/`ytmusicapi` search path and multi-author tracks.
+- Retains the fork's GitHub Releases updater and cross-platform release packaging.
 
-## Installation
+The v1.5.5 migration changes `Cargo.toml` and `Cargo.lock` for the renderer, plus the fork updater, release packaging, and documentation. The lockfile diff is 13 insertions and 315 deletions. WGPU-only package records were dropped; a few inactive WGPU-named records remain. No WGPU crate is in the active dependency graph or the release binary.
 
-### Quick install (Linux / macOS)
+The fork's release pipeline publishes Linux, macOS, and Windows assets with SHA-256 sidecars, macOS DMGs, and a Windows Inno Setup installer, and creates draft GitHub Releases.
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/GooseOb/music_plr/master/scripts/install.sh | bash
+## Memory usage
+
+| Renderer | RSS | PSS |
+|---|---:|---:|
+| WGPU | 144.45 MB | 128.22 MB |
+| TinySkia | 74.29 MB | 65.93 MB |
+
+TinySkia reduced memory usage by approximately **48.6% RSS and 48.6% PSS** compared with WGPU in these measurements.
+
+## Build and testing
+
+The v1.5.5 migration branch passes `cargo metadata --locked --no-deps`, `cargo check --locked`, and the fork updater tests. An optimized release build (`cargo build --release --locked`) completed successfully on Linux x86_64 with LTO, `codegen-units = 1`, `panic = "abort"`, and stripping enabled. The resulting binary contains no WGPU components.
+
+The renderer configuration used by v1.5.5 is the same one that passed local runtime checks for audio playback, album artwork, mosaic rendering, and SVG rendering. Validation remains local, not a cross-platform test matrix; no FPS or speed improvement is claimed.
+
+## Cross-platform compatibility
+
+For v1.5.5, cross-platform compatibility is expected but not confirmed. I have not tested Windows, macOS, or other Linux distributions for this release, so no measured compatibility rate is claimed.
+
+The renderer change is still limited to configuration: I enabled Iced's TinySkia feature and removed the explicit Iced `wgpu` feature. I left the upstream audio, providers, playback, media controls, file handling, and platform-specific application code alone. The upstream v1.5.2–v1.5.5 integration comes from GooseMusic upstream. The existing X11 and Wayland features are still enabled.
+
+Basically, I changed how the interface is drawn, not how the app plays music or connects to providers. The build and runtime checks passed on Linux x86_64. Compatibility on Windows, macOS, and other Linux distributions is expected, but not confirmed.
+
+## Known issue
+
+Very long track titles can sometimes overlap the next row in the upright track list. It is a small visual issue and was left as-is.
+
+## Build
+
+You need the Rust toolchain.
+
+```bash
+git clone --branch release-prep/tiny-skia-v1.5.5 https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr.git
+cd music_plr
+cargo build --release --locked
 ```
 
-Detects your platform, downloads the latest release, and installs everything. On Linux it also sets up the desktop entry and icon.
+The binary is in `target/release/`.
 
-### Windows
+Prebuilt `v1.5.5-tiny-skia.1` assets are available on [GitHub Releases](https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr/releases), including Linux and macOS install assets and the Windows installer.
 
-Download the [latest release](https://github.com/GooseOb/music_plr/releases/latest/download/goosemusic-x86_64-pc-windows-msvc.zip) and extract to a folder. Run `goosemusic.exe`.
+## Links
 
-### Manual install
-
-Download from [GitHub releases](https://github.com/GooseOb/music_plr/releases) or compile from source:
-
-```sh
-cargo install goosemusic
-```
-
-#### Linux desktop integration
-
-The release tarball includes a `.desktop` file and icon. After extracting:
-
-```sh
-cp goosemusic ~/.local/bin/
-cp goosemusic.desktop ~/.local/share/applications/
-cp icons/logo.svg ~/.local/share/icons/goosemusic.svg
-```
-
-#### macOS
-
-Extract the `.app.tar.gz` and drag `Goosemusic.app` to your Applications folder. On first open, right-click → Open if macOS blocks it (unsigned app).
-
-## Supported languages
-
-English (`en`), Polski (`pl`), Español (`es`), Português (Brasil) (`pt_br`), 简体中文 (`zh_cn`), العربية (`ar`), Беларуская (`be`), Français (`fr`), Deutsch (`de`), 日本語 (`ja`), Русский (`ru`), हिन्दी (`hi`), Українська (`uk`).
-
-Pick a language from the in-app **Settings** view. To add one, copy `src/i18n/en.rs` to a new module, translate the strings, and append one entry to the `languages!` macro in `src/i18n/mod.rs` — the `Language` enum and picker are generated from that list.
-
-## Development
-
-**Prerequisites**
-
-- **Rust** (stable, edition 2021)
-- **yt-dlp** — YouTube audio streaming, downloads, and search pagination
-- **D-Bus** session bus (Linux) — for MPRIS
-- Network access — lyrics fetch live from [LRCLib](https://lrclib.net), [Genius](https://genius.com), and [NetEase Cloud Music](https://music.163.com) (no keys)
-
-```sh
-cargo build
-cargo run
-```
-
-## Keyboard shortcuts
-
-| Key                                                                                                      | Action                                                                                         |
-| -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| <kbd>Space</kbd>                                                                                         | Toggle play/pause                                                                              |
-| <kbd>Esc</kbd>                                                                                           | Close in-list search → close search history → clear selection → return to Search               |
-| <kbd>Delete</kbd>                                                                                        | Delete selected tracks (playlist/Downloads/Trashbin views)                                     |
-| <kbd>←</kbd>/<kbd>→</kbd> or <kbd>h</kbd>/<kbd>l</kbd>                                                   | Move focus between queue panel and track list                                                  |
-| <kbd>↑</kbd>/<kbd>↓</kbd> or <kbd>k</kbd>/<kbd>j</kbd>                                                   | Move through the focused list (auto-scrolls, wraps)                                            |
-| <kbd>gg</kbd> / <kbd>G</kbd>, <kbd>Home</kbd>/<kbd>End</kbd>                                             | First / last row                                                                               |
-| <kbd>PgUp</kbd>/<kbd>PgDn</kbd>, <kbd>Ctrl</kbd>+<kbd>U</kbd>/<kbd>D</kbd>                               | Page / half-page                                                                               |
-| <kbd>Shift</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd> (<kbd>J</kbd>/<kbd>K</kbd>), <kbd>Ctrl</kbd>+<kbd>Space</kbd> | Extend selection / toggle selection on focused row                                             |
-| <kbd>Ctrl</kbd>+<kbd>F</kbd>                                                                             | In-list fuzzy search over the hovered track list (<kbd>n</kbd>/<kbd>p</kbd> step matches)      |
-| <kbd>Enter</kbd>                                                                                         | Play the focused (or hovered) track                                                            |
-| <kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>Ctrl</kbd>+<kbd>V</kbd>                                              | Copy / paste selected tracks                                                                   |
-| <kbd>Ctrl</kbd>+<kbd>A</kbd>                                                                             | Select all tracks in the focused list                                                          |
-| <kbd>Alt</kbd>+<kbd>P</kbd> / <kbd>Alt</kbd>+<kbd>1..5</kbd>, <kbd>Alt</kbd>+<kbd>S</kbd>                | Stage search provider / scope (pending until <kbd>Enter</kbd>)                                 |
-| <kbd>Alt</kbd>+<kbd>Enter</kbd>                                                                          | Run the pending search from anywhere                                                           |
-| <kbd>Ctrl</kbd>+<kbd>K</kbd>                                                                             | Playlist picker: fuzzy search over playlists (<kbd>Shift</kbd>+<kbd>Enter</kbd> plays)         |
-| <kbd>Alt</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd>                                                                 | Previous / next playlist                                                                       |
-| <kbd>Alt</kbd>+<kbd>←</kbd>/<kbd>→</kbd>                                                                 | Back / forward in the focused pane                                                             |
-| <kbd>N</kbd> / <kbd>P</kbd>                                                                              | Next / previous track                                                                          |
-| <kbd>Q</kbd> / <kbd>R</kbd> / <kbd>Shift</kbd>+<kbd>L</kbd>                                              | Toggle queue / repeat / lyrics                                                                 |
-| <kbd>T</kbd>                                                                                             | Switch queue panel tab: Queue ↔ Recently Played (opens panel if hidden)                        |
-| <kbd>M</kbd>, <kbd>-</kbd>/<kbd>=</kbd>, <kbd>,</kbd>/<kbd>.</kbd>                                       | Mute, volume, seek ∓5s (<kbd>Shift</kbd> ∓10s)                                                 |
-| <kbd>\</kbd> / <kbd>Shift</kbd>+<kbd>\</kbd>                                                             | Split focused pane side by side / stacked                                                      |
-| <kbd>Ctrl</kbd>+<kbd>W</kbd>                                                                             | Close the focused pane                                                                         |
-| <kbd>Ctrl</kbd>+<kbd>←</kbd>/<kbd>→</kbd>/<kbd>↑</kbd>/<kbd>↓</kbd>                                      | Move focus to the adjacent pane                                                                |
-| <kbd>Ctrl</kbd>+<kbd>Tab</kbd>, <kbd>Ctrl</kbd>+<kbd>1..4</kbd>                                          | Cycle / jump between panes                                                                     |
-| <kbd>?</kbd> / <kbd>F1</kbd> / <kbd>Ctrl</kbd>+<kbd>P</kbd>                                              | Command palette: commands, views, library, playlists (<kbd>Shift</kbd>+<kbd>Enter</kbd> plays) |
-
-Every runnable action above is also listed by name in the command palette (`?`, `F1` or `Ctrl+P`), with its key chord; `Ctrl+K` opens the playlist-only picker.
-
-## Configuration
-
-Everything is configured from the in-app **Settings** view, which saves changes immediately.
-
-- **Linux** — config `~/.config/goosemusic`, data `~/.local/share/goosemusic`, cache `~/.cache/goosemusic`
-- **macOS** — config and data `~/Library/Application Support/goosemusic`, cache `~/Library/Caches/goosemusic`
-- **Windows** — config `%APPDATA%\goosemusic\config`, data `%LOCALAPPDATA%\goosemusic\data`, cache `%LOCALAPPDATA%\goosemusic\cache`
-
-`config.json` and `custom_providers.json` live in the config directory; playlists, library, downloads, trashbin, search history, and server playlists in the data directory; session, home feed, streamed audio, thumbnails, and lyrics in the cache directory. Quit the app before hand-editing JSON — settings and data are rewritten as you use the app.
-
-## Technical notes
-
-**State** — All state lives in one `MusicPlayer`; `view()` is a pure function of `&MusicPlayer`. Background work (search, download, thumbnails)
-returns via an mpsc channel drained by a 1Hz tick (none when idle). Stores implement a `JsonStore` trait and degrade to defaults on failure.
-
-**Audio** — A dedicated output thread runs the rodio sink. yt-dlp streams AAC-in-M4A into a still-growing cache file; a custom
-`SymphoniaStreamingSource` over a non-seekable `GrowingMediaSource` decodes sequentially so playback starts within a few KB.
-Cached/downloaded/local files use the same source in seekable mode. Per-track normalization gain is computed once (symphonia) and applied on
-replay.
-
-## License
-
-MIT
+- [TinySkia v1.5.5 branch](https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr/tree/release-prep/tiny-skia-v1.5.5)
+- [TinySkia v1.5.5 migration commit 6b88926](https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr/commit/6b88926036a1e957a0b2c588be784cccdace2908)
+- [Release v1.5.5-tiny-skia.1](https://github.com/awfghHJVBKLDHIOWAEFGUH/music_plr/releases/tag/v1.5.5-tiny-skia.1)
+- [Original GooseMusic project](https://github.com/GooseOb/music_plr)
