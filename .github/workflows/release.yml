@@ -175,68 +175,6 @@ jobs:
             goosemusic-x86_64-unknown-linux-gnu.tar.gz.sha256
           if-no-files-found: error
 
-  build-macos:
-    name: Build (${{ matrix.target }})
-    needs: [icons, tag]
-    runs-on: macos-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: aarch64-apple-darwin
-          - target: x86_64-apple-darwin
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.tag.outputs.sha }}
-
-      - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}
-
-      - name: Download icons
-        uses: actions/download-artifact@v8
-        with:
-          name: icons
-          path: .
-
-      - name: Build
-        env:
-          GOOSE_RELEASE_TAG: ${{ needs.tag.outputs.value }}
-        run: cargo build --release --locked --target ${{ matrix.target }}
-
-      - name: Build .app bundle
-        run: |
-          chmod +x macos/build-app.sh
-          macos/build-app.sh \
-            target/${{ matrix.target }}/release/goosemusic \
-            macos/goosemusic.icns \
-            dist
-
-      - name: Package
-        run: |
-          tar -czf goosemusic-${{ matrix.target }}.tar.gz \
-            -C dist Goosemusic.app
-          echo "ARCHIVE=goosemusic-${{ matrix.target }}.tar.gz" >> "$GITHUB_ENV"
-          # Checksum sidecar verified by the self-updater:
-          # `{asset}.sha256` next to `{asset}` on the release.
-          sha256sum "goosemusic-${{ matrix.target }}.tar.gz" > "goosemusic-${{ matrix.target }}.tar.gz.sha256"
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: goosemusic-${{ matrix.target }}
-          path: |
-            ${{ env.ARCHIVE }}
-            ${{ env.ARCHIVE }}.sha256
-          if-no-files-found: error
-
   build-windows:
     name: Build (x86_64-pc-windows-msvc)
     needs: [icons, tag]
@@ -288,7 +226,7 @@ jobs:
 
   release:
     name: Publish release
-    needs: [tag, build-linux, build-macos, build-windows]
+    needs: [tag, build-linux, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
